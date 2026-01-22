@@ -23,7 +23,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer database.CloseDB()
 
 	// Устанавливаем режим Gin
 	ginMode := os.Getenv("GIN_MODE")
