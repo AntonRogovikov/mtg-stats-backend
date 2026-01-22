@@ -8,20 +8,26 @@ import (
 	"mtg-stats-backend/handlers"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Загружаем .env файл для локальной разработки
-	// В Railway это не нужно - переменные уже установлены
-	if err := godotenv.Load(); err != nil {
-		log.Println("Note: .env file not found, using environment variables")
+
+	// Проверяем, что мы в Railway
+	if os.Getenv("RAILWAY_ENVIRONMENT") == "" {
+		log.Println("⚠️ Запуск в локальном режиме")
+	} else {
+		log.Println("🚀 Запуск в Railway")
+
+		// Проверяем наличие DATABASE_URL
+		if os.Getenv("DATABASE_URL") == "" {
+			log.Fatal("❌ DATABASE_URL не найден! Добавьте PostgreSQL базу в Railway Dashboard")
+		}
 	}
 
-	// Инициализируем базу данных
+	// Инициализируем базу
 	err := database.InitDB()
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatalf("❌ Ошибка базы данных: %v", err)
 	}
 
 	// Устанавливаем режим Gin

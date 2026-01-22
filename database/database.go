@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"mtg-stats-backend/models"
 
@@ -14,85 +15,66 @@ import (
 var DB *gorm.DB
 
 func InitDB() error {
-	// Получаем DSN строку
-	dsn := getDSN()
+	log.Println("🚀 Инициализация базы данных...")
+
+	// В Railway ДОЛЖНА быть эта переменная
+	dsn := os.Getenv("DATABASE_URL")
 
 	if dsn == "" {
-		return fmt.Errorf("DATABASE_URL не установлен. Добавьте PostgreSQL базу в Railway")
+		// Если нет DATABASE_URL - значит PostgreSQL не добавлен
+		log.Println("⚠️ ВНИМАНИЕ: DATABASE_URL не найден!")
+		log.Println("👉 Действия:")
+		log.Println("1. В Railway Dashboard нажмите '+'")
+		log.Println("2. Выберите 'Database' → 'PostgreSQL'")
+		log.Println("3. Дождитесь создания")
+		log.Println("4. Передеплойте приложение")
+		return fmt.Errorf("PostgreSQL база не добавлена в Railway. Добавьте базу через интерфейс Railway")
 	}
 
-	log.Printf("Подключение к базе данных: %s", maskPassword(dsn))
+	// Логируем безопасную версию (без пароля)
+	safeDSN := dsn
+	if strings.Contains(safeDSN, "://") {
+		parts := strings.SplitN(safeDSN, "://", 2)
+		if len(parts) == 2 {
+			schema := parts[0]
+			rest := parts[1]
+			if strings.Contains(rest, "@") {
+				userPass := strings.SplitN(rest, "@", 2)[0]
+				safeDSN = fmt.Sprintf("%s://%s:*****@%s", schema, strings.Split(userPass, ":")[0], strings.SplitN(rest, "@", 2)[1])
+			}
+		}
+	}
+	log.Printf("📡 Подключение к Railway PostgreSQL: %s", safeDSN)
 
 	// Подключаемся
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("ошибка подключения: %v\nDSN: %s", err, maskPassword(dsn))
+		return fmt.Errorf("❌ Ошибка подключения к Railway PostgreSQL: %v", err)
 	}
 
 	// Проверяем соединение
 	sqlDB, err := DB.DB()
 	if err != nil {
-		return fmt.Errorf("ошибка получения соединения: %v", err)
+		return fmt.Errorf("❌ Ошибка получения соединения: %v", err)
 	}
 
-	err = sqlDB.Ping()
-	if err != nil {
-		return fmt.Errorf("ping failed: %v", err)
+	if err := sqlDB.Ping(); err != nil {
+		return fmt.Errorf("❌ PostgreSQL не отвечает: %v", err)
 	}
 
-	// Автомиграция
-	err = DB.AutoMigrate(&models.User{})
-	if err != nil {
-		return fmt.Errorf("ошибка создания таблиц: %v", err)
+	// Настраиваем пул соединений
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(20)
+
+	// Создаем таблицы
+	if err := DB.AutoMigrate(&models.User{}); err != nil {
+		return fmt.Errorf("❌ Ошибка создания таблиц: %v", err)
 	}
 
-	log.Println("✅ База данных подключена успешно")
+	log.Println("✅ База данных Railway PostgreSQL подключена успешно!")
+	log.Printf("✅ Таблица 'users' создана/проверена")
 	return nil
-}
-
-// getDSN возвращает строку подключения
-func getDSN() string {
-	// 1. Проверяем DATABASE_URL (Railway)
-	if url := os.Getenv("DATABASE_URL"); url != "" {
-		return url
-	}
-
-	// 2. Проверяем Railway PostgreSQL URL (альтернативное название)
-	if url := os.Getenv("POSTGRESQL_URL"); url != "" {
-		return url
-	}
-
-	// 3. Проверяем отдельные переменные для локальной разработки
-	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PASSWORD")
-	dbname := os.Getenv("DB_NAME")
-	sslmode := os.Getenv("DB_SSLMODE")
-
-	if host != "" && dbname != "" {
-		if port == "" {
-			port = "5432"
-		}
-		if sslmode == "" {
-			sslmode = "disable"
-		}
-
-		return fmt.Sprintf(
-			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-			host, port, user, password, dbname, sslmode,
-		)
-	}
-
-	// 4. Fallback для локальной разработки
-	return "postgresql://postgres:password@localhost:5432/mtg_stats?sslmode=disable"
-}
-
-// maskPassword скрывает пароль в логах
-func maskPassword(dsn string) string {
-	// Скрываем пароль для безопасности
-	return dsn // В реальном коде добавьте маскировку
 }
 
 func GetDB() *gorm.DB {
