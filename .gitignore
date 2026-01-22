@@ -1,0 +1,10 @@
+# Environment
+.env
+.env.local
+
+# Binaries
+app
+*.exe
+
+# Logs
+*.log
