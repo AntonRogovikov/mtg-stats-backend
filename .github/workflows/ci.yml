@@ -1,36 +1,13 @@
-name: MTG Stats Backend CI
-
+name: CI
 on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Go
-      uses: actions/setup-go@v4
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
       with:
-        go-version: '1.25.4'
-    
-    - name: Verify Go version
-      run: go version
-    
-    - name: Download dependencies
-      run: go mod download
-    
-    - name: Build
-      run: go build -o mtg-app-backend .
-      # или go build -o backend .
-      # или go build .  (создаст имя автоматически)
-    
-    - name: Run application
-      run: ./mtg-app-backend
-      # или ./backend
-      # или ./mtg-stats-backend (если создалось автоматически)
-    
-    - name: List files
-      run: ls -la
-      # Это покажет, какой файл создался
+        go-version: '1.25'
+    - run: go build -o app .
+    - run: ./app
