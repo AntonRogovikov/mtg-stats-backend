@@ -62,24 +62,37 @@ func main() {
 			"version": "1.0.0",
 			"mode":    gin.Mode(),
 			"endpoints": gin.H{
-				"GET /api/v1/users":        "Get all users",
-				"GET /api/v1/users/:id":    "Get user by ID",
-				"POST /api/v1/users":       "Create new user",
-				"PUT /api/v1/users/:id":    "Update user",
-				"DELETE /api/v1/users/:id": "Delete user",
-				"GET /health":              "Health check",
+				"GET /api/users":        "Get all users",
+				"GET /api/users/:id":    "Get user by ID",
+				"POST /api/users":       "Create new user",
+				"PUT /api/users/:id":    "Update user",
+				"DELETE /api/users/:id": "Delete user",
+				"GET /api/decks":        "Get all decks",
+				"GET /api/decks/:id":    "Get deck by ID",
+				"POST /api/decks":       "Create new deck",
+				"PUT /api/decks/:id":    "Update deck",
+				"DELETE /api/decks/:id": "Delete deck",
+				"GET /health":           "Health check",
 			},
 		})
 	})
 
 	// Группа маршрутов для API
-	api := router.Group("/api/v1")
+	api := router.Group("/api")
 	{
+		// User
 		api.GET("/users", handlers.GetUsers)
 		api.GET("/users/:id", handlers.GetUser)
 		api.POST("/users", handlers.CreateUser)
 		api.PUT("/users/:id", handlers.UpdateUser)
 		api.DELETE("/users/:id", handlers.DeleteUser)
+
+		// Deck
+		api.GET("/decks", handlers.GetDecks)
+		api.GET("/decks/:id", handlers.GetDeck)
+		api.POST("/decks", handlers.CreateDeck)
+		api.PUT("/decks/:id", handlers.UpdateDeck)
+		api.DELETE("/decks/:id", handlers.DeleteDeck)
 	}
 
 	// Health check
