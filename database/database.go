@@ -68,7 +68,7 @@ func InitDB() error {
 	sqlDB.SetMaxOpenConns(20)
 
 	// Создаем таблицы
-	if err := DB.AutoMigrate(&models.User{}); err != nil {
+	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}); err != nil {
 		return fmt.Errorf("❌ Ошибка создания таблиц: %v", err)
 	}
 
