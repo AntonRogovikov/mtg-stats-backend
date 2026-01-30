@@ -95,16 +95,16 @@ func main() {
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
 		// Games
-		api.GET("/games", handlers.GetGames)
-		api.GET("/games/active", handlers.GetActiveGame)
-		api.GET("/games/:id", handlers.GetGame)
-		api.POST("/games", handlers.CreateGame)
-		api.PUT("/games/active", handlers.UpdateActiveGame)
-		api.POST("/games/active/finish", handlers.FinishGame)
+		api.GET("/api/games", handlers.GetGames)
+		api.GET("/api/games/active", handlers.GetActiveGame)
+		api.GET("/api/games/:id", handlers.GetGame)
+		api.POST("/api/games", handlers.CreateGame)
+		api.PUT("/api/games/active", handlers.UpdateActiveGame)
+		api.POST("/api/games/active/finish", handlers.FinishGame)
 
 		// Stats
-		api.GET("/stats/players", handlers.GetPlayerStats)
-		api.GET("/stats/decks", handlers.GetDeckStats)
+		api.GET("/api/stats/players", handlers.GetPlayerStats)
+		api.GET("/api/stats/decks", handlers.GetDeckStats)
 	}
 
 	// Health check
