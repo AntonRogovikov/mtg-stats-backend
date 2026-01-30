@@ -68,12 +68,12 @@ func InitDB() error {
 	sqlDB.SetMaxOpenConns(20)
 
 	// Создаем таблицы
-	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}); err != nil {
+	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}); err != nil {
 		return fmt.Errorf("❌ Ошибка создания таблиц: %v", err)
 	}
 
 	log.Println("✅ База данных Railway PostgreSQL подключена успешно!")
-	log.Printf("✅ Таблица 'users' создана/проверена")
+	log.Printf("✅ Таблицы users, decks, games созданы/проверены")
 	return nil
 }
 
