@@ -19,7 +19,10 @@ func teamForPlayerIndex(i int) int {
 func GetPlayerStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
-	db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games)
+	if err := db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch games"})
+		return
+	}
 
 	type agg struct {
 		playerName     string
@@ -133,7 +136,10 @@ func GetPlayerStats(c *gin.Context) {
 func GetDeckStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
-	db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games)
+	if err := db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch games"})
+		return
+	}
 
 	type agg struct {
 		name  string

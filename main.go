@@ -62,17 +62,25 @@ func main() {
 			"version": "1.0.0",
 			"mode":    gin.Mode(),
 			"endpoints": gin.H{
-				"GET /api/users":        "Get all users",
-				"GET /api/users/:id":    "Get user by ID",
-				"POST /api/users":       "Create new user",
-				"PUT /api/users/:id":    "Update user",
-				"DELETE /api/users/:id": "Delete user",
-				"GET /api/decks":        "Get all decks",
-				"GET /api/decks/:id":    "Get deck by ID",
-				"POST /api/decks":       "Create new deck",
-				"PUT /api/decks/:id":    "Update deck",
-				"DELETE /api/decks/:id": "Delete deck",
-				"GET /health":           "Health check",
+				"GET /api/users":           "Get all users",
+				"GET /api/users/:id":       "Get user by ID",
+				"POST /api/users":         "Create new user",
+				"PUT /api/users/:id":      "Update user",
+				"DELETE /api/users/:id":   "Delete user",
+				"GET /api/decks":          "Get all decks",
+				"GET /api/decks/:id":      "Get deck by ID",
+				"POST /api/decks":         "Create new deck",
+				"PUT /api/decks/:id":      "Update deck",
+				"DELETE /api/decks/:id":   "Delete deck",
+				"GET /api/games":          "Get all games",
+				"GET /api/games/active":   "Get active game",
+				"GET /api/games/:id":      "Get game by ID",
+				"POST /api/games":         "Create game",
+				"PUT /api/games/active":   "Update active game",
+				"POST /api/games/active/finish": "Finish active game",
+				"GET /api/stats/players":  "Get player stats",
+				"GET /api/stats/decks":    "Get deck stats",
+				"GET /health":             "Health check",
 			},
 		})
 	})
@@ -95,16 +103,16 @@ func main() {
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
 		// Games
-		api.GET("/api/games", handlers.GetGames)
-		api.GET("/api/games/active", handlers.GetActiveGame)
-		api.GET("/api/games/:id", handlers.GetGame)
-		api.POST("/api/games", handlers.CreateGame)
-		api.PUT("/api/games/active", handlers.UpdateActiveGame)
-		api.POST("/api/games/active/finish", handlers.FinishGame)
+		api.GET("/games", handlers.GetGames)
+		api.GET("/games/active", handlers.GetActiveGame)
+		api.GET("/games/:id", handlers.GetGame)
+		api.POST("/games", handlers.CreateGame)
+		api.PUT("/games/active", handlers.UpdateActiveGame)
+		api.POST("/games/active/finish", handlers.FinishGame)
 
 		// Stats
-		api.GET("/api/stats/players", handlers.GetPlayerStats)
-		api.GET("/api/stats/decks", handlers.GetDeckStats)
+		api.GET("/stats/players", handlers.GetPlayerStats)
+		api.GET("/stats/decks", handlers.GetDeckStats)
 	}
 
 	// Health check
