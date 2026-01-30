@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 
 	"mtg-stats-backend/database"
@@ -102,11 +103,12 @@ func main() {
 		api.PUT("/decks/:id", handlers.UpdateDeck)
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
-		// Games
+		// Games — POST регистрируем до GET /:id, плюс с trailing slash
+		api.POST("/games", handlers.CreateGame)
+		api.POST("/games/", handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
 		api.GET("/games/active", handlers.GetActiveGame)
 		api.GET("/games/:id", handlers.GetGame)
-		api.POST("/games", handlers.CreateGame)
 		api.PUT("/games/active", handlers.UpdateActiveGame)
 		api.POST("/games/active/finish", handlers.FinishGame)
 
@@ -114,6 +116,15 @@ func main() {
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)
 	}
+
+	// 404 — подсказка по URL (частая ошибка: запрос без /api)
+	router.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "Not found",
+			"path":    c.Request.URL.Path,
+			"hint":    "Проверьте URL: игры создаются через POST /api/games (обязателен префикс /api)",
+		})
+	})
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
