@@ -75,9 +75,22 @@ func CreateGame(c *gin.Context) {
 		UpdatedAt:         now,
 	}
 	for _, p := range req.Players {
+		var userID uint
+		var userName string
+		if p.User != nil && p.User.ID != 0 {
+			userID = p.User.ID
+			userName = p.User.Name
+		} else {
+			userID = uint(p.UserID)
+			userName = p.UserName
+		}
+		if userID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "each player must have user_id or user.id"})
+			return
+		}
 		game.Players = append(game.Players, models.GamePlayer{
-			UserID:   p.User.ID,
-			User:     p.User,
+			UserID:   userID,
+			User:     models.User{ID: userID, Name: userName},
 			DeckID:   p.DeckID,
 			DeckName: p.DeckName,
 		})

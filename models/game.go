@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"strconv"
+	"time"
+)
 
 type GamePlayer struct {
 	ID       uint   `json:"id" gorm:"primaryKey"`
@@ -38,10 +42,43 @@ type Game struct {
 	UpdatedAt         time.Time    `json:"updated_at"`
 }
 
+// flexUint — при разборе JSON принимает и число, и строку (Flutter шлёт user_id как строку)
+type flexUint uint
+
+func (u *flexUint) UnmarshalJSON(b []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch x := v.(type) {
+	case float64:
+		*u = flexUint(x)
+		return nil
+	case string:
+		n, err := strconv.ParseUint(x, 10, 64)
+		if err != nil {
+			return err
+		}
+		*u = flexUint(n)
+		return nil
+	default:
+		return nil
+	}
+}
+
+// CreateGamePlayerInput — тело запроса создания игры: принимает и user_id/user_name (Flutter), и вложенный user
+type CreateGamePlayerInput struct {
+	UserID   flexUint `json:"user_id"`
+	UserName string   `json:"user_name"`
+	User     *User    `json:"user,omitempty"`
+	DeckID   int      `json:"deck_id"`
+	DeckName string   `json:"deck_name"`
+}
+
 type CreateGameRequest struct {
-	TurnLimitSeconds int          `json:"turn_limit_seconds"`
-	FirstMoveTeam    int          `json:"first_move_team"`
-	Players          []GamePlayer `json:"players"`
+	TurnLimitSeconds int                    `json:"turn_limit_seconds"`
+	FirstMoveTeam    int                    `json:"first_move_team"`
+	Players          []CreateGamePlayerInput `json:"players"`
 }
 
 type FinishGameRequest struct {
