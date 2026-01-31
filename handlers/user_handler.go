@@ -1,3 +1,4 @@
+// Package handlers — HTTP-обработчики для пользователей, колод, игр и статистики.
 package handlers
 
 import (
@@ -10,17 +11,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetUsers возвращает всех пользователей
+// GetUsers возвращает список всех пользователей (сортировка по id DESC).
 func GetUsers(c *gin.Context) {
 	db := database.GetDB()
 	var users []models.User
 
-	// GORM делает всю работу за нас
 	result := db.Order("id DESC").Find(&users)
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch users",
+			"error": "Не удалось загрузить список пользователей",
 		})
 		return
 	}
@@ -28,12 +28,12 @@ func GetUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
-// GetUser возвращает пользователя по ID
+// GetUser возвращает одного пользователя по id (404 при отсутствии).
 func GetUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid user ID",
+			"error": "Некорректный ID пользователя",
 		})
 		return
 	}
@@ -41,12 +41,11 @@ func GetUser(c *gin.Context) {
 	db := database.GetDB()
 	var user models.User
 
-	// Просто First - GORM сам добавит WHERE id = ?
 	result := db.First(&user, id)
 
 	if result.Error != nil {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "User not found",
+			"error": "Пользователь не найден",
 		})
 		return
 	}
@@ -54,30 +53,27 @@ func GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-// CreateUser создает нового пользователя
+// CreateUser создаёт пользователя по телу запроса (имя 2–100 символов).
 func CreateUser(c *gin.Context) {
 	var userReq models.UserRequest
 
-	// Валидация входных данных
 	if err := c.ShouldBindJSON(&userReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid input data",
+			"error":   "Некорректные данные запроса",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Проверяем длину имени
 	if len(userReq.Name) < 2 || len(userReq.Name) > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Name must be between 2 and 100 characters",
+			"error": "Имя должно быть от 2 до 100 символов",
 		})
 		return
 	}
 
 	db := database.GetDB()
 
-	// Создаем пользователя с помощью GORM
 	user := models.User{
 		Name: userReq.Name,
 	}
@@ -85,7 +81,7 @@ func CreateUser(c *gin.Context) {
 	result := db.Create(&user)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to create user",
+			"error": "Не удалось создать пользователя",
 		})
 		return
 	}
@@ -93,12 +89,12 @@ func CreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, user)
 }
 
-// UpdateUser обновляет пользователя
+// UpdateUser обновляет имя пользователя по id (404 при отсутствии).
 func UpdateUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid user ID",
+			"error": "Некорректный ID пользователя",
 		})
 		return
 	}
@@ -107,38 +103,35 @@ func UpdateUser(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&userReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid input data",
+			"error":   "Некорректные данные запроса",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Проверяем длину имени
 	if len(userReq.Name) < 2 || len(userReq.Name) > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Name must be between 2 and 100 characters",
+			"error": "Имя должно быть от 2 до 100 символов",
 		})
 		return
 	}
 
 	db := database.GetDB()
 
-	// Проверяем, существует ли пользователь
 	var existingUser models.User
 	if err := db.First(&existingUser, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "User not found",
+			"error": "Пользователь не найден",
 		})
 		return
 	}
 
-	// Обновляем пользователя
 	existingUser.Name = userReq.Name
 	result := db.Save(&existingUser)
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update user",
+			"error": "Не удалось обновить пользователя",
 		})
 		return
 	}
@@ -146,37 +139,36 @@ func UpdateUser(c *gin.Context) {
 	c.JSON(http.StatusOK, existingUser)
 }
 
-// DeleteUser удаляет пользователя
+// DeleteUser удаляет пользователя по id (404 если не найден).
 func DeleteUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid user ID",
+			"error": "Некорректный ID пользователя",
 		})
 		return
 	}
 
 	db := database.GetDB()
 
-	// Удаляем пользователя с помощью GORM
 	result := db.Delete(&models.User{}, id)
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to delete user",
+			"error": "Не удалось удалить пользователя",
 		})
 		return
 	}
 
 	if result.RowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "User not found",
+			"error": "Пользователь не найден",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "User deleted successfully",
+		"message": "Пользователь успешно удалён",
 		"id":      id,
 	})
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetDecks возвращает все колоды
+// GetDecks возвращает список всех колод (сортировка по id DESC).
 func GetDecks(c *gin.Context) {
 	db := database.GetDB()
 	var decks []models.Deck
@@ -19,7 +19,7 @@ func GetDecks(c *gin.Context) {
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch decks",
+			"error": "Не удалось загрузить список колод",
 		})
 		return
 	}
@@ -27,12 +27,12 @@ func GetDecks(c *gin.Context) {
 	c.JSON(http.StatusOK, decks)
 }
 
-// GetDeck возвращает колоду по ID
+// GetDeck возвращает одну колоду по id (404 при отсутствии).
 func GetDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid deck ID",
+			"error": "Некорректный ID колоды",
 		})
 		return
 	}
@@ -44,7 +44,7 @@ func GetDeck(c *gin.Context) {
 
 	if result.Error != nil {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Deck not found",
+			"error": "Колода не найдена",
 		})
 		return
 	}
@@ -52,23 +52,22 @@ func GetDeck(c *gin.Context) {
 	c.JSON(http.StatusOK, deck)
 }
 
-// CreateDeck создает новую колоду
+// CreateDeck создаёт колоду по телу запроса (название 2–150 символов).
 func CreateDeck(c *gin.Context) {
 	var deckReq models.DeckRequest
 
-	// Валидация входных данных
 	if err := c.ShouldBindJSON(&deckReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid input data",
+			"error":   "Некорректные данные запроса",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Проверяем длину названия
-	if len(deckReq.Name) < 2 || len(deckReq.Name) > 100 {
+	// Проверяем длину названия (модель Deck допускает до 150 символов)
+	if len(deckReq.Name) < 2 || len(deckReq.Name) > 150 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Name must be between 2 and 100 characters",
+			"error": "Название должно быть от 2 до 150 символов",
 		})
 		return
 	}
@@ -83,7 +82,7 @@ func CreateDeck(c *gin.Context) {
 	result := db.Create(&deck)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to create deck",
+			"error": "Не удалось создать колоду",
 		})
 		return
 	}
@@ -91,12 +90,12 @@ func CreateDeck(c *gin.Context) {
 	c.JSON(http.StatusCreated, deck)
 }
 
-// UpdateDeck обновляет колоду
+// UpdateDeck обновляет название колоды по id (404 при отсутствии).
 func UpdateDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid deck ID",
+			"error": "Некорректный ID колоды",
 		})
 		return
 	}
@@ -105,16 +104,16 @@ func UpdateDeck(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&deckReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Invalid input data",
+			"error":   "Некорректные данные запроса",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Проверяем длину названия
-	if len(deckReq.Name) < 2 || len(deckReq.Name) > 100 {
+	// Проверяем длину названия (модель Deck допускает до 150 символов)
+	if len(deckReq.Name) < 2 || len(deckReq.Name) > 150 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Name must be between 2 and 100 characters",
+			"error": "Название должно быть от 2 до 150 символов",
 		})
 		return
 	}
@@ -125,7 +124,7 @@ func UpdateDeck(c *gin.Context) {
 	var existingDeck models.Deck
 	if err := db.First(&existingDeck, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Deck not found",
+			"error": "Колода не найдена",
 		})
 		return
 	}
@@ -136,7 +135,7 @@ func UpdateDeck(c *gin.Context) {
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update deck",
+			"error": "Не удалось обновить колоду",
 		})
 		return
 	}
@@ -144,37 +143,36 @@ func UpdateDeck(c *gin.Context) {
 	c.JSON(http.StatusOK, existingDeck)
 }
 
-// DeleteDeck удаляет колоду
+// DeleteDeck удаляет колоду по id (404 если не найдена).
 func DeleteDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid deck ID",
+			"error": "Некорректный ID колоды",
 		})
 		return
 	}
 
 	db := database.GetDB()
 
-	// Удаляем колоду
 	result := db.Delete(&models.Deck{}, id)
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to delete deck",
+			"error": "Не удалось удалить колоду",
 		})
 		return
 	}
 
 	if result.RowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Deck not found",
+			"error": "Колода не найдена",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Deck deleted successfully",
+		"message": "Колода успешно удалена",
 		"id":      id,
 	})
 }

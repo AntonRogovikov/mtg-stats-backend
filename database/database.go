@@ -1,3 +1,4 @@
+// Package database — подключение к PostgreSQL и инициализация GORM.
 package database
 
 import (
@@ -12,16 +13,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// DB — глобальный экземпляр GORM (инициализируется в InitDB).
 var DB *gorm.DB
 
+// InitDB подключается к PostgreSQL по DATABASE_URL, проверяет соединение,
+// настраивает пул и выполняет AutoMigrate для users, decks, games и связанных таблиц.
 func InitDB() error {
 	log.Println("🚀 Инициализация базы данных...")
 
-	// В Railway ДОЛЖНА быть эта переменная
 	dsn := os.Getenv("DATABASE_URL")
 
 	if dsn == "" {
-		// Если нет DATABASE_URL - значит PostgreSQL не добавлен
 		log.Println("⚠️ ВНИМАНИЕ: DATABASE_URL не найден!")
 		log.Println("👉 Действия:")
 		log.Println("1. В Railway Dashboard нажмите '+'")
@@ -31,7 +33,7 @@ func InitDB() error {
 		return fmt.Errorf("PostgreSQL база не добавлена в Railway. Добавьте базу через интерфейс Railway")
 	}
 
-	// Логируем безопасную версию (без пароля)
+	// Логируем DSN без пароля (подстановка *****)
 	safeDSN := dsn
 	if strings.Contains(safeDSN, "://") {
 		parts := strings.SplitN(safeDSN, "://", 2)
@@ -46,14 +48,12 @@ func InitDB() error {
 	}
 	log.Printf("📡 Подключение к Railway PostgreSQL: %s", safeDSN)
 
-	// Подключаемся
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("❌ Ошибка подключения к Railway PostgreSQL: %v", err)
 	}
 
-	// Проверяем соединение
 	sqlDB, err := DB.DB()
 	if err != nil {
 		return fmt.Errorf("❌ Ошибка получения соединения: %v", err)
@@ -63,11 +63,9 @@ func InitDB() error {
 		return fmt.Errorf("❌ PostgreSQL не отвечает: %v", err)
 	}
 
-	// Настраиваем пул соединений
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetMaxOpenConns(20)
 
-	// Создаем таблицы
 	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}); err != nil {
 		return fmt.Errorf("❌ Ошибка создания таблиц: %v", err)
 	}
@@ -77,6 +75,7 @@ func InitDB() error {
 	return nil
 }
 
+// GetDB возвращает глобальный экземпляр *gorm.DB. Вызывать после успешного InitDB().
 func GetDB() *gorm.DB {
 	return DB
 }

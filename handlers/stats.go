@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// teamForPlayerIndex возвращает номер команды по индексу игрока в игре: 0,1 → 1; 2,3 → 2.
 func teamForPlayerIndex(i int) int {
 	if i < 2 {
 		return 1
@@ -16,11 +17,12 @@ func teamForPlayerIndex(i int) int {
 	return 2
 }
 
+// GetPlayerStats возвращает агрегированную статистику по каждому игроку (только завершённые игры).
 func GetPlayerStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
 	if err := db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch games"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
 	}
 
@@ -73,9 +75,16 @@ func GetPlayerStats(c *gin.Context) {
 			}
 		}
 
+		// Длительность хода учитываем только у игроков той команды, которая делала ход
 		for _, t := range g.Turns {
-			for _, a := range byUser {
-				a.turnDurations = append(a.turnDurations, t.Duration)
+			team := t.TeamNumber
+			for i, p := range g.Players {
+				if teamForPlayerIndex(i) == team {
+					uid := p.User.ID
+					if byUser[uid] != nil {
+						byUser[uid].turnDurations = append(byUser[uid].turnDurations, t.Duration)
+					}
+				}
 			}
 		}
 	}
@@ -133,11 +142,12 @@ func GetPlayerStats(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// GetDeckStats возвращает агрегированную статистику по колодам (только завершённые игры).
 func GetDeckStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
 	if err := db.Where("end_time IS NOT NULL").Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch games"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
 	}
 

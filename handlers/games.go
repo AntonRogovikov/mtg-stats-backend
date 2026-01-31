@@ -12,34 +12,35 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetGames возвращает все игры (сначала завершённые по дате)
+// GetGames возвращает все игры с игроками и ходами (сортировка по updated_at DESC).
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
 	result := db.Order("updated_at DESC").Preload("Players.User").Preload("Turns").Find(&games)
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch games"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
 	}
 	c.JSON(http.StatusOK, games)
 }
 
-// GetGame возвращает игру по ID
+// GetGame возвращает одну игру по id с игроками и ходами (404 при отсутствии).
 func GetGame(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil || id == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid game ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID игры"})
 		return
 	}
 	db := database.GetDB()
 	var game models.Game
 	if err := db.Preload("Players.User").Preload("Turns").First(&game, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Game not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
 		return
 	}
 	c.JSON(http.StatusOK, &game)
 }
 
+// CreateGame создаёт новую активную игру (409 если уже есть активная). first_move_team — 1 или 2.
 func CreateGame(c *gin.Context) {
 	var req models.CreateGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -47,11 +48,11 @@ func CreateGame(c *gin.Context) {
 		return
 	}
 	if req.FirstMoveTeam < 1 || req.FirstMoveTeam > 2 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "first_move_team must be 1 or 2"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "first_move_team должен быть 1 или 2"})
 		return
 	}
 	if len(req.Players) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "players required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Укажите хотя бы одного игрока"})
 		return
 	}
 
@@ -59,7 +60,7 @@ func CreateGame(c *gin.Context) {
 
 	var active models.Game
 	if err := db.Where("end_time IS NULL").First(&active).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "active game already exists"})
+		c.JSON(http.StatusConflict, gin.H{"error": "Активная игра уже существует"})
 		return
 	}
 
@@ -85,7 +86,7 @@ func CreateGame(c *gin.Context) {
 			userName = p.UserName
 		}
 		if userID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "each player must have user_id or user.id"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "У каждого игрока должен быть user_id или user.id"})
 			return
 		}
 		game.Players = append(game.Players, models.GamePlayer{
@@ -97,7 +98,7 @@ func CreateGame(c *gin.Context) {
 	}
 
 	if err := db.Session(&gorm.Session{FullSaveAssociations: true}).Create(game).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create game"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать игру"})
 		return
 	}
 
@@ -106,16 +107,18 @@ func CreateGame(c *gin.Context) {
 	c.JSON(http.StatusCreated, game)
 }
 
+// GetActiveGame возвращает текущую активную игру (end_time IS NULL). 404 если активной нет.
 func GetActiveGame(c *gin.Context) {
 	db := database.GetDB()
 	var game models.Game
 	if err := db.Where("end_time IS NULL").Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no active game"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
 	c.JSON(http.StatusOK, &game)
 }
 
+// UpdateActiveGame обновляет активную игру: текущий ход и список ходов (404 если активной нет).
 func UpdateActiveGame(c *gin.Context) {
 	var req models.UpdateActiveGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -126,7 +129,7 @@ func UpdateActiveGame(c *gin.Context) {
 	db := database.GetDB()
 	var game models.Game
 	if err := db.Where("end_time IS NULL").First(&game).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no active game"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
 
@@ -136,7 +139,7 @@ func UpdateActiveGame(c *gin.Context) {
 		"current_turn_team":  game.CurrentTurnTeam,
 		"current_turn_start": game.CurrentTurnStart,
 	}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update game"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить игру"})
 		return
 	}
 
@@ -146,7 +149,7 @@ func UpdateActiveGame(c *gin.Context) {
 			req.Turns[i].GameID = game.ID
 		}
 		if err := db.Create(&req.Turns).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update turns"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить ходы"})
 			return
 		}
 	}
@@ -155,6 +158,7 @@ func UpdateActiveGame(c *gin.Context) {
 	c.JSON(http.StatusOK, &game)
 }
 
+// FinishGame завершает активную игру (winning_team 1 или 2). 404 если активной нет.
 func FinishGame(c *gin.Context) {
 	var req models.FinishGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -162,14 +166,14 @@ func FinishGame(c *gin.Context) {
 		return
 	}
 	if req.WinningTeam < 1 || req.WinningTeam > 2 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "winning_team must be 1 or 2"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "winning_team должен быть 1 или 2"})
 		return
 	}
 
 	db := database.GetDB()
 	var game models.Game
 	if err := db.Where("end_time IS NULL").First(&game).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no active game"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
 
@@ -180,7 +184,7 @@ func FinishGame(c *gin.Context) {
 		"end_time":     game.EndTime,
 		"winning_team": game.WinningTeam,
 	}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finish game"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось завершить игру"})
 		return
 	}
 
