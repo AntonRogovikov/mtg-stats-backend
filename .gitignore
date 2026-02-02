@@ -8,3 +8,6 @@ app
 
 # Logs
 *.log
+
+# Uploaded files
+uploads/

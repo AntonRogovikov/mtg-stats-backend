@@ -41,6 +41,9 @@ func main() {
 
 	router := gin.Default()
 
+	// Статика: раздача загруженных изображений колод по URL /uploads/...
+	router.Static("/uploads", "./uploads")
+
 	// CORS: разрешаем запросы с любых источников (для SPA/мобильных клиентов)
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -72,6 +75,7 @@ func main() {
 				"GET /api/decks/:id":      "Колода по ID",
 				"POST /api/decks":         "Создать колоду",
 				"PUT /api/decks/:id":      "Обновить колоду",
+				"POST /api/decks/:id/image": "Загрузить изображение колоды",
 				"DELETE /api/decks/:id":   "Удалить колоду",
 				"GET /api/games":          "Список игр",
 				"GET /api/games/active":   "Активная игра",
@@ -101,6 +105,7 @@ func main() {
 		api.GET("/decks/:id", handlers.GetDeck)
 		api.POST("/decks", handlers.CreateDeck)
 		api.PUT("/decks/:id", handlers.UpdateDeck)
+		api.POST("/decks/:id/image", handlers.UploadDeckImage)
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
 		// Игры (POST до GET /:id, чтобы /active и /:id не конфликтовали; поддержка trailing slash)
