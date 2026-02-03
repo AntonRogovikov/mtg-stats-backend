@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetGames возвращает все игры с игроками и ходами (сортировка по updated_at DESC).
+// GetGames — список игр с игроками и ходами, сортировка по updated_at DESC.
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
@@ -24,7 +24,7 @@ func GetGames(c *gin.Context) {
 	c.JSON(http.StatusOK, games)
 }
 
-// GetGame возвращает одну игру по id с игроками и ходами (404 при отсутствии).
+// GetGame — игра по id с игроками и ходами; 404 если не найдена.
 func GetGame(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil || id == 0 {
@@ -40,7 +40,7 @@ func GetGame(c *gin.Context) {
 	c.JSON(http.StatusOK, &game)
 }
 
-// CreateGame создаёт новую активную игру (409 если уже есть активная). first_move_team — 1 или 2.
+// CreateGame — создание активной игры; first_move_team 1 или 2; 409 если активная уже есть.
 func CreateGame(c *gin.Context) {
 	var req models.CreateGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -102,12 +102,11 @@ func CreateGame(c *gin.Context) {
 		return
 	}
 
-	// Подгружаем User для ответа
 	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
 	c.JSON(http.StatusCreated, game)
 }
 
-// GetActiveGame возвращает текущую активную игру (end_time IS NULL). 404 если активной нет.
+// GetActiveGame — текущая активная игра (end_time IS NULL); 404 если нет.
 func GetActiveGame(c *gin.Context) {
 	db := database.GetDB()
 	var game models.Game
@@ -118,7 +117,7 @@ func GetActiveGame(c *gin.Context) {
 	c.JSON(http.StatusOK, &game)
 }
 
-// UpdateActiveGame обновляет активную игру: текущий ход и список ходов (404 если активной нет).
+// UpdateActiveGame — обновление текущего хода и списка ходов активной игры; 404 если нет активной.
 func UpdateActiveGame(c *gin.Context) {
 	var req models.UpdateActiveGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -158,7 +157,7 @@ func UpdateActiveGame(c *gin.Context) {
 	c.JSON(http.StatusOK, &game)
 }
 
-// FinishGame завершает активную игру (winning_team 1 или 2). 404 если активной нет.
+// FinishGame — завершение активной игры; winning_team 1 или 2; 404 если нет активной.
 func FinishGame(c *gin.Context) {
 	var req models.FinishGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

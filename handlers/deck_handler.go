@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,308 +17,245 @@ import (
 )
 
 const (
-	uploadsDir     = "uploads"
 	decksImagesDir = "uploads/decks"
-	maxImageSize   = 5 << 20 // 5 MB
+	maxImageSize   = 5 << 20
 )
 
-// Разрешённые MIME-типы изображений
 var allowedImageTypes = map[string]string{
 	"image/jpeg": ".jpg",
 	"image/png":  ".png",
 	"image/webp": ".webp",
 }
 
-// GetDecks возвращает список всех колод (сортировка по id DESC).
+// GetDecks — список колод, сортировка по id DESC.
 func GetDecks(c *gin.Context) {
 	db := database.GetDB()
 	var decks []models.Deck
-
-	result := db.Order("id DESC").Find(&decks)
-
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось загрузить список колод",
-		})
+	if err := db.Order("id DESC").Find(&decks).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список колод"})
 		return
 	}
-
 	c.JSON(http.StatusOK, decks)
 }
 
-// GetDeck возвращает одну колоду по id (404 при отсутствии).
+// GetDeck — колода по id; 404 если не найдена.
 func GetDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Некорректный ID колоды",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID колоды"})
 		return
 	}
-
 	db := database.GetDB()
 	var deck models.Deck
-
-	result := db.First(&deck, id)
-
-	if result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Колода не найдена",
-		})
+	if err := db.First(&deck, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
-
 	c.JSON(http.StatusOK, deck)
 }
 
-// CreateDeck создаёт колоду по телу запроса (название 2–150 символов).
+// CreateDeck — создание колоды; название 2–150 символов.
 func CreateDeck(c *gin.Context) {
-	var deckReq models.DeckRequest
-
-	if err := c.ShouldBindJSON(&deckReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Некорректные данные запроса",
-			"details": err.Error(),
-		})
+	var req models.DeckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректные данные", "details": err.Error()})
 		return
 	}
-
-	// Проверяем длину названия (модель Deck допускает до 150 символов)
-	if len(deckReq.Name) < 2 || len(deckReq.Name) > 150 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Название должно быть от 2 до 150 символов",
-		})
+	if len(req.Name) < 2 || len(req.Name) > 150 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Название от 2 до 150 символов"})
 		return
 	}
-
 	db := database.GetDB()
-
-	// Создаем колоду
-	deck := models.Deck{
-		Name: deckReq.Name,
-	}
-
-	result := db.Create(&deck)
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось создать колоду",
-		})
+	deck := models.Deck{Name: req.Name}
+	if err := db.Create(&deck).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать колоду"})
 		return
 	}
-
 	c.JSON(http.StatusCreated, deck)
 }
 
-// UpdateDeck обновляет название колоды по id (404 при отсутствии).
+// UpdateDeck — обновление названия по id; 404 если не найдена.
 func UpdateDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Некорректный ID колоды",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID колоды"})
 		return
 	}
-
-	var deckReq models.DeckRequest
-
-	if err := c.ShouldBindJSON(&deckReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Некорректные данные запроса",
-			"details": err.Error(),
-		})
+	var req models.DeckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректные данные", "details": err.Error()})
 		return
 	}
-
-	// Проверяем длину названия (модель Deck допускает до 150 символов)
-	if len(deckReq.Name) < 2 || len(deckReq.Name) > 150 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Название должно быть от 2 до 150 символов",
-		})
+	if len(req.Name) < 2 || len(req.Name) > 150 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Название от 2 до 150 символов"})
 		return
 	}
-
 	db := database.GetDB()
-
-	// Проверяем, существует ли колода
-	var existingDeck models.Deck
-	if err := db.First(&existingDeck, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Колода не найдена",
-		})
+	var deck models.Deck
+	if err := db.First(&deck, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
-
-	// Обновляем колоду
-	existingDeck.Name = deckReq.Name
-	result := db.Save(&existingDeck)
-
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось обновить колоду",
-		})
+	deck.Name = req.Name
+	if err := db.Save(&deck).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
-
-	c.JSON(http.StatusOK, existingDeck)
+	c.JSON(http.StatusOK, deck)
 }
 
-// UploadDeckImage принимает изображение (multipart/form-data, поле "image"),
-// сохраняет в uploads/decks/{id}.{ext} и обновляет deck.ImageURL.
-func UploadDeckImage(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Некорректный ID колоды",
-		})
-		return
-	}
-
-	header, err := c.FormFile("image")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Не указан файл изображения (ожидается поле 'image')",
-		})
-		return
-	}
-
+// saveDeckImageFile сохраняет файл в uploads/decks/{id}{suffix}.{ext}; suffix "" или "_avatar". Возвращает URL или ошибку.
+func saveDeckImageFile(header *multipart.FileHeader, deckID int, suffix string) (string, error) {
 	if header.Size > maxImageSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": fmt.Sprintf("Размер файла не должен превышать %d МБ", maxImageSize/(1<<20)),
-		})
-		return
+		return "", fmt.Errorf("размер файла не должен превышать %d МБ", maxImageSize/(1<<20))
 	}
 
 	file, err := header.Open()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Не удалось прочитать файл",
-		})
-		return
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
 	}
 	defer file.Close()
 
 	buf := make([]byte, 512)
 	n, err := file.Read(buf)
 	if err != nil && err != io.EOF {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Не удалось прочитать файл",
-		})
-		return
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
 	}
 	contentType := http.DetectContentType(buf[:n])
 	ext, ok := allowedImageTypes[contentType]
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Допустимые форматы: JPEG, PNG, WebP",
-		})
-		return
+		return "", fmt.Errorf("допустимые форматы: JPEG, PNG, WebP")
 	}
 
-	db := database.GetDB()
-	var deck models.Deck
-	if err := db.First(&deck, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Колода не найдена",
-		})
-		return
+	if err := os.MkdirAll(decksImagesDir, 0755); err != nil {
+		return "", fmt.Errorf("не удалось создать каталог: %w", err)
 	}
 
-	fileName := strconv.Itoa(id) + ext
-	dirPath := decksImagesDir
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось создать каталог для загрузок",
-		})
-		return
-	}
-
-	fullPath := filepath.Join(dirPath, fileName)
+	fileName := strconv.Itoa(deckID) + suffix + ext
+	fullPath := filepath.Join(decksImagesDir, fileName)
 	dst, err := os.Create(fullPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось сохранить изображение",
-		})
-		return
+		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
 	}
 	defer dst.Close()
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		os.Remove(fullPath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось прочитать файл",
-		})
-		return
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
 	}
 	if _, err := io.Copy(dst, file); err != nil {
 		os.Remove(fullPath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось сохранить изображение",
-		})
-		return
+		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
 	}
 
-	imageURL := "/uploads/decks/" + fileName
-	deck.ImageURL = imageURL
-	if err := db.Save(&deck).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось обновить колоду",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "Изображение загружено",
-		"image_url": deck.ImageURL,
-		"deck":      deck,
-	})
+	return "/uploads/decks/" + fileName, nil
 }
 
-// DeleteDeck удаляет колоду по id (404 если не найдена). Удаляет и файл изображения, если он был.
+// UploadDeckImage — multipart/form-data с полями image и avatar; оба обязательны. Обновляет ImageURL и AvatarURL колоды.
+func UploadDeckImage(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID колоды"})
+		return
+	}
+	imageHeader, err := c.FormFile("image")
+	if err != nil || imageHeader == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Требуется поле image"})
+		return
+	}
+	avatarHeader, err := c.FormFile("avatar")
+	if err != nil || avatarHeader == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Требуется поле avatar"})
+		return
+	}
+	db := database.GetDB()
+	var deck models.Deck
+	if err := db.First(&deck, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
+		return
+	}
+	imageURL, err := saveDeckImageFile(imageHeader, id, "")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "image: " + err.Error()})
+		return
+	}
+	deck.ImageURL = imageURL
+	avatarURL, err := saveDeckImageFile(avatarHeader, id, "_avatar")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "avatar: " + err.Error()})
+		return
+	}
+	deck.AvatarURL = avatarURL
+	if err := db.Save(&deck).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар загружены", "image_url": deck.ImageURL, "avatar_url": deck.AvatarURL, "deck": deck})
+}
+
+// DeleteDeckImage — удаление файлов изображения и аватара, обнуление ImageURL и AvatarURL.
+func DeleteDeckImage(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID колоды"})
+		return
+	}
+	db := database.GetDB()
+	var deck models.Deck
+	if err := db.First(&deck, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
+		return
+	}
+	if deck.ImageURL == "" && deck.AvatarURL == "" {
+		c.JSON(http.StatusOK, gin.H{"message": "У колоды нет изображения и аватара", "deck": deck})
+		return
+	}
+	for _, u := range []string{deck.ImageURL, deck.AvatarURL} {
+		if u != "" {
+			p := strings.TrimPrefix(u, "/")
+			if p != "" {
+				_ = os.Remove(p)
+			}
+		}
+	}
+	deck.ImageURL = ""
+	deck.AvatarURL = ""
+	if err := db.Save(&deck).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар удалены", "deck": deck})
+}
+
+// DeleteDeck — удаление колоды по id и связанных файлов изображений; 404 если не найдена.
 func DeleteDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Некорректный ID колоды",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный ID колоды"})
 		return
 	}
-
 	db := database.GetDB()
-
 	var deck models.Deck
 	if err := db.First(&deck, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Колода не найдена",
-		})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
-
-	// Удаляем файл изображения, если есть (путь в БД: /uploads/decks/1.jpg → файл uploads/decks/1.jpg)
-	if deck.ImageURL != "" {
-		filePath := strings.TrimPrefix(deck.ImageURL, "/")
-		if filePath != "" {
-			_ = os.Remove(filePath)
+	for _, u := range []string{deck.ImageURL, deck.AvatarURL} {
+		if u != "" {
+			p := strings.TrimPrefix(u, "/")
+			if p != "" {
+				_ = os.Remove(p)
+			}
 		}
 	}
-
 	result := db.Delete(&models.Deck{}, id)
-
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Не удалось удалить колоду",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось удалить колоду"})
 		return
 	}
-
 	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Колода не найдена",
-		})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Колода успешно удалена",
-		"id":      id,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Колода удалена", "id": id})
 }

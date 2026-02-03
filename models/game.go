@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// GamePlayer — участник одной игры: пользователь + колода. Индексы 0,1 — команда 1; 2,3 — команда 2.
+// GamePlayer — участник игры (user + колода); индексы 0,1 — команда 1, 2,3 — команда 2.
 type GamePlayer struct {
 	ID       uint   `json:"id" gorm:"primaryKey"`
 	GameID   uint   `json:"-" gorm:"not null;index"`
@@ -18,7 +18,7 @@ type GamePlayer struct {
 
 func (GamePlayer) TableName() string { return "game_players" }
 
-// GameTurn — один ход в игре: команда, длительность и овертайм в секундах.
+// GameTurn — ход в игре: команда, длительность и овертайм (сек).
 type GameTurn struct {
 	ID         uint `json:"id" gorm:"primaryKey"`
 	GameID     uint `json:"-" gorm:"not null;index"`
@@ -29,8 +29,7 @@ type GameTurn struct {
 
 func (GameTurn) TableName() string { return "game_turns" }
 
-// Game — одна партия: до 4 игроков, ходы, лимит времени, победившая команда (1 или 2).
-// end_time == nil означает активную (незавершённую) игру.
+// Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
 	ID                uint         `json:"id" gorm:"primaryKey"`
 	StartTime         time.Time    `json:"start_time"`
@@ -46,7 +45,7 @@ type Game struct {
 	UpdatedAt         time.Time    `json:"updated_at"`
 }
 
-// flexUint — при разборе JSON принимает число, строку или null (для совместимости с Flutter, где user_id может быть строкой).
+// flexUint — JSON: число, строка или null (совместимость с Flutter).
 type flexUint uint
 
 func (u *flexUint) UnmarshalJSON(b []byte) error {
@@ -74,7 +73,7 @@ func (u *flexUint) UnmarshalJSON(b []byte) error {
 	}
 }
 
-// CreateGamePlayerInput — игрок в запросе создания игры: user_id/user_name или вложенный user.
+// CreateGamePlayerInput — игрок в запросе: user_id/user_name или user.
 type CreateGamePlayerInput struct {
 	UserID   flexUint `json:"user_id"`
 	UserName string   `json:"user_name"`
@@ -83,26 +82,26 @@ type CreateGamePlayerInput struct {
 	DeckName string   `json:"deck_name"`
 }
 
-// CreateGameRequest — тело запроса POST /api/games.
+// CreateGameRequest — запрос создания игры.
 type CreateGameRequest struct {
 	TurnLimitSeconds int                    `json:"turn_limit_seconds"`
 	FirstMoveTeam    int                    `json:"first_move_team"`
 	Players          []CreateGamePlayerInput `json:"players"`
 }
 
-// FinishGameRequest — тело запроса завершения активной игры (победившая команда 1 или 2).
+// FinishGameRequest — завершение игры; winning_team 1 или 2.
 type FinishGameRequest struct {
 	WinningTeam int `json:"winning_team"`
 }
 
-// UpdateActiveGameRequest — тело запроса обновления активной игры (текущий ход, список ходов).
+// UpdateActiveGameRequest — обновление активной игры (текущий ход, ходы).
 type UpdateActiveGameRequest struct {
 	CurrentTurnTeam  int        `json:"current_turn_team"`
 	CurrentTurnStart *time.Time `json:"current_turn_start,omitempty"`
 	Turns            []GameTurn `json:"turns"`
 }
 
-// PlayerStats — агрегированная статистика по игроку (ответ GET /api/stats/players).
+// PlayerStats — агрегат по игроку (ответ /api/stats/players).
 type PlayerStats struct {
 	PlayerName           string  `json:"player_name"`
 	GamesCount           int     `json:"games_count"`
@@ -118,7 +117,7 @@ type PlayerStats struct {
 	BestDeckGames        int     `json:"best_deck_games"`
 }
 
-// DeckStats — агрегированная статистика по колоде (ответ GET /api/stats/decks).
+// DeckStats — агрегат по колоде (ответ /api/stats/decks).
 type DeckStats struct {
 	DeckID     int     `json:"deck_id"`
 	DeckName   string  `json:"deck_name"`

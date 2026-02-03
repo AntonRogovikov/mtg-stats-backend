@@ -1,11 +1,12 @@
-// Package main — точка входа MTG Stats API.
-// REST API для учёта игр Magic: The Gathering: пользователи, колоды, игры и статистика.
+// Package main — точка входа MTG Stats API (пользователи, колоды, игры, статистика).
 package main
 
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/handlers"
@@ -13,26 +14,82 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func main() {
-	// Проверяем окружение (Railway или локальный запуск)
-	if os.Getenv("RAILWAY_ENVIRONMENT") == "" {
-		log.Println("⚠️ Запуск в локальном режиме")
-	} else {
-		log.Println("🚀 Запуск в Railway")
+// corsMiddleware — CORS: при LOCAL_DSN разрешает localhost/127.0.0.1; иначе CORS_ALLOWED_ORIGINS или "*".
+func corsMiddleware(isLocal, isRailway bool) gin.HandlerFunc {
+	allowedList := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		allowOrigin := ""
 
-		// Проверяем наличие DATABASE_URL
-		if os.Getenv("DATABASE_URL") == "" {
-			log.Fatal("❌ DATABASE_URL не найден! Добавьте PostgreSQL базу в Railway Dashboard")
+		if len(allowedList) > 0 {
+			for _, o := range allowedList {
+				if o == origin {
+					allowOrigin = origin
+					break
+				}
+			}
+		} else if isLocal && origin != "" && isLocalhostOrigin(origin) {
+			allowOrigin = origin
+		} else {
+			allowOrigin = "*"
+		}
+
+		if allowOrigin != "" {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		}
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func parseCORSOrigins(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if o := strings.TrimSpace(part); o != "" {
+			out = append(out, o)
 		}
 	}
+	return out
+}
 
-	// Инициализация подключения к PostgreSQL и миграции таблиц
-	err := database.InitDB()
-	if err != nil {
-		log.Fatalf("❌ Ошибка базы данных: %v", err)
+func isLocalhostOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1"
+}
+
+func main() {
+	isRailway := os.Getenv("RAILWAY_ENVIRONMENT") != ""
+	isLocal := os.Getenv("LOCAL_DSN") != ""
+
+	if isLocal {
+		log.Println("Запуск в локальном режиме (LOCAL_DSN)")
+	} else if isRailway {
+		log.Println("Запуск в Railway")
+		if os.Getenv("DATABASE_URL") == "" {
+			log.Fatal("DATABASE_URL не задан. Добавьте PostgreSQL в Railway Dashboard")
+		}
+	} else {
+		log.Println("Установите LOCAL_DSN или DATABASE_URL")
 	}
 
-	// Режим Gin: debug / release / test
+	if err := database.InitDB(); err != nil {
+		log.Fatalf("Ошибка БД: %v", err)
+	}
+
 	ginMode := os.Getenv("GIN_MODE")
 	if ginMode == "" {
 		ginMode = "debug"
@@ -40,25 +97,9 @@ func main() {
 	gin.SetMode(ginMode)
 
 	router := gin.Default()
-
-	// Статика: раздача загруженных изображений колод по URL /uploads/...
+	router.Use(corsMiddleware(isLocal, isRailway))
 	router.Static("/uploads", "./uploads")
 
-	// CORS: разрешаем запросы с любых источников (для SPA/мобильных клиентов)
-	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
-
-	// Корневой маршрут: информация об API и список эндпоинтов
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "MTG Stats API запущен",
@@ -66,49 +107,47 @@ func main() {
 			"version": "1.0.0",
 			"mode":    gin.Mode(),
 			"endpoints": gin.H{
-				"GET /api/users":           "Список пользователей",
-				"GET /api/users/:id":       "Пользователь по ID",
-				"POST /api/users":         "Создать пользователя",
-				"PUT /api/users/:id":      "Обновить пользователя",
-				"DELETE /api/users/:id":   "Удалить пользователя",
-				"GET /api/decks":          "Список колод",
-				"GET /api/decks/:id":      "Колода по ID",
-				"POST /api/decks":         "Создать колоду",
-				"PUT /api/decks/:id":      "Обновить колоду",
-				"POST /api/decks/:id/image": "Загрузить изображение колоды",
-				"DELETE /api/decks/:id":   "Удалить колоду",
-				"GET /api/games":          "Список игр",
-				"GET /api/games/active":   "Активная игра",
-				"GET /api/games/:id":      "Игра по ID",
-				"POST /api/games":         "Создать игру",
-				"PUT /api/games/active":   "Обновить активную игру",
+				"GET /api/users":                "Список пользователей",
+				"GET /api/users/:id":            "Пользователь по ID",
+				"POST /api/users":               "Создать пользователя",
+				"PUT /api/users/:id":            "Обновить пользователя",
+				"DELETE /api/users/:id":         "Удалить пользователя",
+				"GET /api/decks":                "Список колод",
+				"GET /api/decks/:id":            "Колода по ID",
+				"POST /api/decks":               "Создать колоду",
+				"PUT /api/decks/:id":            "Обновить колоду",
+				"POST /api/decks/:id/image":     "Загрузить изображение и аватар колоды (multipart: image, avatar)",
+				"DELETE /api/decks/:id/image":   "Удалить изображение и аватар колоды",
+				"DELETE /api/decks/:id":         "Удалить колоду",
+				"GET /api/games":                "Список игр",
+				"GET /api/games/active":         "Активная игра",
+				"GET /api/games/:id":            "Игра по ID",
+				"POST /api/games":               "Создать игру",
+				"PUT /api/games/active":         "Обновить активную игру",
 				"POST /api/games/active/finish": "Завершить активную игру",
-				"GET /api/stats/players":  "Статистика игроков",
-				"GET /api/stats/decks":    "Статистика колод",
-				"GET /health":             "Проверка состояния",
+				"GET /api/stats/players":        "Статистика игроков",
+				"GET /api/stats/decks":          "Статистика колод",
+				"GET /health":                   "Проверка состояния",
 			},
 		})
 	})
 
-	// Группа /api — CRUD пользователей, колод, игр и статистика
 	api := router.Group("/api")
 	{
-		// Пользователи
 		api.GET("/users", handlers.GetUsers)
 		api.GET("/users/:id", handlers.GetUser)
 		api.POST("/users", handlers.CreateUser)
 		api.PUT("/users/:id", handlers.UpdateUser)
 		api.DELETE("/users/:id", handlers.DeleteUser)
 
-		// Колоды
 		api.GET("/decks", handlers.GetDecks)
 		api.GET("/decks/:id", handlers.GetDeck)
 		api.POST("/decks", handlers.CreateDeck)
 		api.PUT("/decks/:id", handlers.UpdateDeck)
 		api.POST("/decks/:id/image", handlers.UploadDeckImage)
+		api.DELETE("/decks/:id/image", handlers.DeleteDeckImage)
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
-		// Игры (POST до GET /:id, чтобы /active и /:id не конфликтовали; поддержка trailing slash)
 		api.POST("/games", handlers.CreateGame)
 		api.POST("/games/", handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
@@ -117,21 +156,18 @@ func main() {
 		api.PUT("/games/active", handlers.UpdateActiveGame)
 		api.POST("/games/active/finish", handlers.FinishGame)
 
-		// Статистика игроков и колод
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)
 	}
 
-	// 404: подсказка по корректному URL (частая ошибка — запрос без префикса /api)
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "Не найдено",
-			"path":    c.Request.URL.Path,
-			"hint":    "Проверьте URL: игры создаются через POST /api/games (обязателен префикс /api)",
+			"error": "Не найдено",
+			"path":  c.Request.URL.Path,
+			"hint":  "Используйте префикс /api, например POST /api/games",
 		})
 	})
 
-	// Health check: проверка доступности сервиса и подключения к БД
 	router.GET("/health", func(c *gin.Context) {
 		db := database.GetDB()
 
@@ -164,8 +200,7 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🚀 Server starting on port %s in %s mode", port, gin.Mode())
-
+	log.Printf("Сервер слушает порт %s (%s)", port, gin.Mode())
 	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Не удалось запустить сервер:", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// teamForPlayerIndex возвращает номер команды по индексу игрока в игре: 0,1 → 1; 2,3 → 2.
+// teamForPlayerIndex — индекс игрока 0,1 → команда 1; 2,3 → команда 2.
 func teamForPlayerIndex(i int) int {
 	if i < 2 {
 		return 1
@@ -17,7 +17,7 @@ func teamForPlayerIndex(i int) int {
 	return 2
 }
 
-// GetPlayerStats возвращает агрегированную статистику по каждому игроку (только завершённые игры).
+// GetPlayerStats — агрегат по игрокам по завершённым играм (победы, ходы, лучшая колода).
 func GetPlayerStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
@@ -75,7 +75,6 @@ func GetPlayerStats(c *gin.Context) {
 			}
 		}
 
-		// Длительность хода учитываем только у игроков той команды, которая делала ход
 		for _, t := range g.Turns {
 			team := t.TeamNumber
 			for i, p := range g.Players {
@@ -142,7 +141,7 @@ func GetPlayerStats(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// GetDeckStats возвращает агрегированную статистику по колодам (только завершённые игры).
+// GetDeckStats — агрегат по колодам по завершённым играм (игры, победы, %).
 func GetDeckStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
