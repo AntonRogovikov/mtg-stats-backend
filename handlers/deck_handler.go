@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/models"
@@ -24,7 +25,7 @@ const (
 )
 
 var (
-	uploadDir   string
+	uploadDir     string
 	uploadDirOnce sync.Once
 )
 
@@ -41,6 +42,18 @@ func getUploadDir() string {
 // GetUploadDir возвращает корневую директорию для загрузок (для Static в main). На Railway задайте UPLOAD_DIR=/data.
 func GetUploadDir() string {
 	return getUploadDir()
+}
+
+// imageURLWithCacheBust добавляет ?t=updated_at к URL, чтобы браузер не показывал старую кэшированную картинку.
+func imageURLWithCacheBust(url string, updatedAt time.Time) string {
+	if url == "" {
+		return ""
+	}
+	sep := "?"
+	if strings.Contains(url, "?") {
+		sep = "&"
+	}
+	return url + sep + "t=" + strconv.FormatInt(updatedAt.Unix(), 10)
 }
 
 var allowedImageTypes = map[string]string{
@@ -118,6 +131,10 @@ func GetDecks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список колод"})
 		return
 	}
+	for i := range decks {
+		decks[i].ImageURL = imageURLWithCacheBust(decks[i].ImageURL, decks[i].UpdatedAt)
+		decks[i].AvatarURL = imageURLWithCacheBust(decks[i].AvatarURL, decks[i].UpdatedAt)
+	}
 	c.JSON(http.StatusOK, decks)
 }
 
@@ -134,6 +151,8 @@ func GetDeck(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
+	deck.ImageURL = imageURLWithCacheBust(deck.ImageURL, deck.UpdatedAt)
+	deck.AvatarURL = imageURLWithCacheBust(deck.AvatarURL, deck.UpdatedAt)
 	c.JSON(http.StatusOK, deck)
 }
 
@@ -226,7 +245,13 @@ func UploadDeckImage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар загружены", "image_url": deck.ImageURL, "avatar_url": deck.AvatarURL, "deck": deck})
+	// URL с ?t=... чтобы браузер сразу подгрузил новую картинку, а не кэш
+	imgURL := imageURLWithCacheBust(deck.ImageURL, deck.UpdatedAt)
+	avURL := imageURLWithCacheBust(deck.AvatarURL, deck.UpdatedAt)
+	deckResp := deck
+	deckResp.ImageURL = imgURL
+	deckResp.AvatarURL = avURL
+	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар загружены", "image_url": imgURL, "avatar_url": avURL, "deck": deckResp})
 }
 
 // DeleteDeckImage — удаление файлов изображения и аватара с диска, обнуление ImageURL и AvatarURL.
