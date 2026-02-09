@@ -69,6 +69,8 @@ func CreateGame(c *gin.Context) {
 		StartTime:         now,
 		TurnLimitSeconds:  req.TurnLimitSeconds,
 		FirstMoveTeam:     req.FirstMoveTeam,
+		Team1Name:         req.Team1Name,
+		Team2Name:         req.Team2Name,
 		CurrentTurnTeam:   req.FirstMoveTeam,
 		Players:           make([]models.GamePlayer, 0, len(req.Players)),
 		Turns:             []models.GameTurn{},

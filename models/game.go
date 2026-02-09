@@ -31,18 +31,20 @@ func (GameTurn) TableName() string { return "game_turns" }
 
 // Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
-	ID                uint         `json:"id" gorm:"primaryKey"`
-	StartTime         time.Time    `json:"start_time"`
-	EndTime           *time.Time   `json:"end_time,omitempty"`
-	TurnLimitSeconds  int          `json:"turn_limit_seconds"`
-	FirstMoveTeam     int          `json:"first_move_team"`
-	Players           []GamePlayer `json:"players" gorm:"foreignKey:GameID"`
-	Turns             []GameTurn   `json:"turns" gorm:"foreignKey:GameID"`
-	CurrentTurnTeam   int          `json:"current_turn_team"`
-	CurrentTurnStart  *time.Time   `json:"current_turn_start,omitempty"`
-	WinningTeam       *int         `json:"winning_team,omitempty"`
-	CreatedAt         time.Time    `json:"created_at"`
-	UpdatedAt         time.Time    `json:"updated_at"`
+	ID               uint         `json:"id" gorm:"primaryKey"`
+	StartTime        time.Time    `json:"start_time"`
+	EndTime          *time.Time   `json:"end_time,omitempty"`
+	TurnLimitSeconds int          `json:"turn_limit_seconds"`
+	FirstMoveTeam    int          `json:"first_move_team"`
+	Team1Name        string       `json:"team1_name,omitempty"`
+	Team2Name        string       `json:"team2_name,omitempty"`
+	Players          []GamePlayer `json:"players" gorm:"foreignKey:GameID"`
+	Turns            []GameTurn   `json:"turns" gorm:"foreignKey:GameID"`
+	CurrentTurnTeam  int          `json:"current_turn_team"`
+	CurrentTurnStart *time.Time   `json:"current_turn_start,omitempty"`
+	WinningTeam      *int         `json:"winning_team,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
 // flexUint — JSON: число, строка или null (совместимость с Flutter).
@@ -84,8 +86,10 @@ type CreateGamePlayerInput struct {
 
 // CreateGameRequest — запрос создания игры.
 type CreateGameRequest struct {
-	TurnLimitSeconds int                    `json:"turn_limit_seconds"`
-	FirstMoveTeam    int                    `json:"first_move_team"`
+	TurnLimitSeconds int                     `json:"turn_limit_seconds"`
+	FirstMoveTeam    int                     `json:"first_move_team"`
+	Team1Name        string                  `json:"team1_name,omitempty"`
+	Team2Name        string                  `json:"team2_name,omitempty"`
 	Players          []CreateGamePlayerInput `json:"players"`
 }
 
@@ -103,18 +107,18 @@ type UpdateActiveGameRequest struct {
 
 // PlayerStats — агрегат по игроку (ответ /api/stats/players).
 type PlayerStats struct {
-	PlayerName           string  `json:"player_name"`
-	GamesCount           int     `json:"games_count"`
-	WinsCount            int     `json:"wins_count"`
-	WinPercent           float64 `json:"win_percent"`
-	FirstMoveWins        int     `json:"first_move_wins"`
-	FirstMoveGames       int     `json:"first_move_games"`
-	FirstMoveWinPercent  float64 `json:"first_move_win_percent"`
-	AvgTurnDurationSec   int     `json:"avg_turn_duration_sec"`
-	MaxTurnDurationSec   int     `json:"max_turn_duration_sec"`
-	BestDeckName         string  `json:"best_deck_name"`
-	BestDeckWins         int     `json:"best_deck_wins"`
-	BestDeckGames        int     `json:"best_deck_games"`
+	PlayerName          string  `json:"player_name"`
+	GamesCount          int     `json:"games_count"`
+	WinsCount           int     `json:"wins_count"`
+	WinPercent          float64 `json:"win_percent"`
+	FirstMoveWins       int     `json:"first_move_wins"`
+	FirstMoveGames      int     `json:"first_move_games"`
+	FirstMoveWinPercent float64 `json:"first_move_win_percent"`
+	AvgTurnDurationSec  int     `json:"avg_turn_duration_sec"`
+	MaxTurnDurationSec  int     `json:"max_turn_duration_sec"`
+	BestDeckName        string  `json:"best_deck_name"`
+	BestDeckWins        int     `json:"best_deck_wins"`
+	BestDeckGames       int     `json:"best_deck_games"`
 }
 
 // DeckStats — агрегат по колоде (ответ /api/stats/decks).
