@@ -162,7 +162,7 @@ func main() {
 
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Не найдено",
+			"error": "Не найден маршрут",
 			"path":  c.Request.URL.Path,
 			"hint":  "Используйте префикс /api, например POST /api/games",
 		})
