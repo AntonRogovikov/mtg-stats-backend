@@ -98,7 +98,7 @@ func main() {
 
 	router := gin.Default()
 	router.Use(corsMiddleware(isLocal, isRailway))
-	router.Static("/uploads", "./uploads")
+	router.Static("/uploads", handlers.GetUploadDir())
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{

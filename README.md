@@ -1,5 +1,12 @@
 # MTG Stats Backend
 
+## Конфигурация
+
+- **База данных:** `DATABASE_URL` (PostgreSQL) или `LOCAL_DSN` для локального запуска.
+- **Изображения колод** сохраняются на диск. Корень каталога задаётся переменной **`UPLOAD_DIR`**:
+  - Локально по умолчанию: `./uploads`.
+  - **Railway с Volume:** создайте Volume в Railway, примонтируйте в `/data` и задайте `UPLOAD_DIR=/data`. 
+
 ## Основные эндпоинты
 
 ### Пользователи
@@ -14,9 +21,8 @@
 - `POST /api/decks` — создать колоду
 - `GET /api/decks/:id` — получить колоду
 - `PUT /api/decks/:id` — обновить колоду
-- `POST /api/decks/:id/image` — загрузить изображение колоды
-- `DELETE /api/decks/:id/image` — удалить изображение колоды
-- `POST /api/decks/:id/avatar` — загрузить аватар колоды
+- `POST /api/decks/:id/image` — загрузить изображение и аватар колоды (multipart: поля `image` и `avatar`)
+- `DELETE /api/decks/:id/image` — удалить изображение и аватар колоды
 - `DELETE /api/decks/:id` — удалить колоду
 
 ### Игры

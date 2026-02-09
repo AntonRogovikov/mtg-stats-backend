@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/models"
@@ -17,14 +18,96 @@ import (
 )
 
 const (
-	decksImagesDir = "uploads/decks"
-	maxImageSize   = 5 << 20
+	decksSubdir   = "decks"
+	maxImageSize  = 5 << 20
+	defaultUpload = "./uploads"
 )
+
+var (
+	uploadDir   string
+	uploadDirOnce sync.Once
+)
+
+func getUploadDir() string {
+	uploadDirOnce.Do(func() {
+		uploadDir = os.Getenv("UPLOAD_DIR")
+		if uploadDir == "" {
+			uploadDir = defaultUpload
+		}
+	})
+	return uploadDir
+}
+
+// GetUploadDir возвращает корневую директорию для загрузок (для Static в main). На Railway задайте UPLOAD_DIR=/data.
+func GetUploadDir() string {
+	return getUploadDir()
+}
 
 var allowedImageTypes = map[string]string{
 	"image/jpeg": ".jpg",
 	"image/png":  ".png",
 	"image/webp": ".webp",
+}
+
+// saveDeckImageFile сохраняет файл в {UPLOAD_DIR}/decks/{id}{suffix}.{ext}; suffix "" или "_avatar". Возвращает URL /uploads/decks/...
+func saveDeckImageFile(header *multipart.FileHeader, deckID int, suffix string) (string, error) {
+	if header.Size > maxImageSize {
+		return "", fmt.Errorf("размер файла не должен превышать %d МБ", maxImageSize/(1<<20))
+	}
+
+	file, err := header.Open()
+	if err != nil {
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
+	}
+	defer file.Close()
+
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
+	}
+	contentType := http.DetectContentType(buf[:n])
+	ext, ok := allowedImageTypes[contentType]
+	if !ok {
+		return "", fmt.Errorf("допустимые форматы: JPEG, PNG, WebP")
+	}
+
+	base := getUploadDir()
+	dir := filepath.Join(base, decksSubdir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("не удалось создать каталог: %w", err)
+	}
+
+	fileName := strconv.Itoa(deckID) + suffix + ext
+	fullPath := filepath.Join(dir, fileName)
+	dst, err := os.Create(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		os.Remove(fullPath)
+		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
+	}
+	if _, err := io.Copy(dst, file); err != nil {
+		os.Remove(fullPath)
+		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
+	}
+
+	return "/uploads/" + decksSubdir + "/" + fileName, nil
+}
+
+// pathFromImageURL превращает URL вида /uploads/decks/123.jpg в полный путь на диске.
+func pathFromImageURL(imageURL string) string {
+	if imageURL == "" || !strings.HasPrefix(imageURL, "/uploads/") {
+		return ""
+	}
+	rel := strings.TrimPrefix(imageURL, "/uploads/")
+	if rel == "" || strings.Contains(rel, "..") {
+		return ""
+	}
+	return filepath.Join(getUploadDir(), filepath.FromSlash(rel))
 }
 
 // GetDecks — список колод, сортировка по id DESC.
@@ -104,54 +187,7 @@ func UpdateDeck(c *gin.Context) {
 	c.JSON(http.StatusOK, deck)
 }
 
-// saveDeckImageFile сохраняет файл в uploads/decks/{id}{suffix}.{ext}; suffix "" или "_avatar". Возвращает URL или ошибку.
-func saveDeckImageFile(header *multipart.FileHeader, deckID int, suffix string) (string, error) {
-	if header.Size > maxImageSize {
-		return "", fmt.Errorf("размер файла не должен превышать %d МБ", maxImageSize/(1<<20))
-	}
-
-	file, err := header.Open()
-	if err != nil {
-		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
-	}
-	defer file.Close()
-
-	buf := make([]byte, 512)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
-	}
-	contentType := http.DetectContentType(buf[:n])
-	ext, ok := allowedImageTypes[contentType]
-	if !ok {
-		return "", fmt.Errorf("допустимые форматы: JPEG, PNG, WebP")
-	}
-
-	if err := os.MkdirAll(decksImagesDir, 0755); err != nil {
-		return "", fmt.Errorf("не удалось создать каталог: %w", err)
-	}
-
-	fileName := strconv.Itoa(deckID) + suffix + ext
-	fullPath := filepath.Join(decksImagesDir, fileName)
-	dst, err := os.Create(fullPath)
-	if err != nil {
-		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
-	}
-	defer dst.Close()
-
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		os.Remove(fullPath)
-		return "", fmt.Errorf("не удалось прочитать файл: %w", err)
-	}
-	if _, err := io.Copy(dst, file); err != nil {
-		os.Remove(fullPath)
-		return "", fmt.Errorf("не удалось сохранить файл: %w", err)
-	}
-
-	return "/uploads/decks/" + fileName, nil
-}
-
-// UploadDeckImage — multipart/form-data с полями image и avatar; оба обязательны. Обновляет ImageURL и AvatarURL колоды.
+// UploadDeckImage — multipart/form-data с полями image и avatar; оба обязательны. Сохраняет в UPLOAD_DIR/decks (на диске / Volume).
 func UploadDeckImage(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
@@ -193,7 +229,7 @@ func UploadDeckImage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар загружены", "image_url": deck.ImageURL, "avatar_url": deck.AvatarURL, "deck": deck})
 }
 
-// DeleteDeckImage — удаление файлов изображения и аватара, обнуление ImageURL и AvatarURL.
+// DeleteDeckImage — удаление файлов изображения и аватара с диска, обнуление ImageURL и AvatarURL.
 func DeleteDeckImage(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
@@ -211,11 +247,8 @@ func DeleteDeckImage(c *gin.Context) {
 		return
 	}
 	for _, u := range []string{deck.ImageURL, deck.AvatarURL} {
-		if u != "" {
-			p := strings.TrimPrefix(u, "/")
-			if p != "" {
-				_ = os.Remove(p)
-			}
+		if p := pathFromImageURL(u); p != "" {
+			_ = os.Remove(p)
 		}
 	}
 	deck.ImageURL = ""
@@ -227,7 +260,7 @@ func DeleteDeckImage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар удалены", "deck": deck})
 }
 
-// DeleteDeck — удаление колоды по id и связанных файлов изображений; 404 если не найдена.
+// DeleteDeck — удаление колоды по id и связанных файлов изображений.
 func DeleteDeck(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
@@ -241,11 +274,8 @@ func DeleteDeck(c *gin.Context) {
 		return
 	}
 	for _, u := range []string{deck.ImageURL, deck.AvatarURL} {
-		if u != "" {
-			p := strings.TrimPrefix(u, "/")
-			if p != "" {
-				_ = os.Remove(p)
-			}
+		if p := pathFromImageURL(u); p != "" {
+			_ = os.Remove(p)
 		}
 	}
 	result := db.Delete(&models.Deck{}, id)
