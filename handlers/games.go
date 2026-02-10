@@ -192,3 +192,37 @@ func FinishGame(c *gin.Context) {
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, &game)
 }
+
+// ClearGamesAndTurns — полная очистка таблиц games, game_players и game_turns.
+func ClearGamesAndTurns(c *gin.Context) {
+	db := database.GetDB()
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось начать транзакцию очистки"})
+		return
+	}
+
+	if err := tx.Exec("DELETE FROM game_turns").Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить ходы игр"})
+		return
+	}
+	if err := tx.Exec("DELETE FROM game_players").Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить игроков игр"})
+		return
+	}
+	if err := tx.Exec("DELETE FROM games").Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить игры"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось завершить транзакцию очистки"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Таблицы игр и ходов успешно очищены"})
+}

@@ -32,7 +32,13 @@
 - `GET /api/games/active` — активная игра
 - `PUT /api/games/active` — обновить активную игру
 - `POST /api/games/active/finish` — завершить активную игру
+- `DELETE /api/games` — полная очистка таблиц игр и ходов
 
 ### Статистика
 - `GET /api/stats/players` — статистика игроков
 - `GET /api/stats/decks` — статистика колод
+
+### Экспорт данных
+- `GET /api/export/all` — экспорт всех данных (пользователи, колоды, игры с игроками и ходами, изображения колод в base64) в **gzip-архиве JSON**. 
+  - Ответ содержит заголовки `Content-Encoding: gzip`, `Content-Type: application/json`.
+- `POST /api/import/all` — полная замена всех данных БД и файлов изображений по **gzip-архиву JSON**, полученному из `GET /api/export/all`.

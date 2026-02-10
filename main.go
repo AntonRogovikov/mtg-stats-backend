@@ -127,6 +127,9 @@ func main() {
 				"POST /api/games/active/finish": "Завершить активную игру",
 				"GET /api/stats/players":        "Статистика игроков",
 				"GET /api/stats/decks":          "Статистика колод",
+				"GET /api/export/all":           "Экспорт всех данных (пользователи, колоды, игры, изображения в base64) в gzip-архиве JSON",
+				"POST /api/import/all":          "Полная замена всех данных из gzip-архива JSON",
+				"DELETE /api/games":             "Полная очистка игр и ходов",
 				"GET /health":                   "Проверка состояния",
 			},
 		})
@@ -151,6 +154,7 @@ func main() {
 		api.POST("/games", handlers.CreateGame)
 		api.POST("/games/", handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
+		api.DELETE("/games", handlers.ClearGamesAndTurns)
 		api.GET("/games/active", handlers.GetActiveGame)
 		api.GET("/games/:id", handlers.GetGame)
 		api.PUT("/games/active", handlers.UpdateActiveGame)
@@ -158,6 +162,9 @@ func main() {
 
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)
+
+		api.GET("/export/all", handlers.ExportAllData)
+		api.POST("/import/all", handlers.ImportAllData)
 	}
 
 	router.NoRoute(func(c *gin.Context) {
