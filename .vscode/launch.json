@@ -12,6 +12,7 @@
             "program": "${workspaceFolder}",
             "env": {
                 "LOCAL_DSN": "host=localhost user=postgres password=postgres dbname=mtg_stats port=5432 sslmode=disable",
+                "API_TOKEN": "a376721b-0174-4189-b3b3-0bc85efa880d",
                 "GIN_MODE": "debug",
                 "PORT": "8080"
             },

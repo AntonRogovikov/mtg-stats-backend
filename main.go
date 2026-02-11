@@ -10,6 +10,7 @@ import (
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/handlers"
+	"mtg-stats-backend/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -100,12 +101,21 @@ func main() {
 	router.Use(corsMiddleware(isLocal, isRailway))
 	router.Static("/uploads", handlers.GetUploadDir())
 
+	apiToken := strings.TrimSpace(os.Getenv("API_TOKEN"))
+	if apiToken != "" {
+		log.Println("API защищён Bearer-токеном (API_TOKEN)")
+	} else {
+		log.Println("API без авторизации (API_TOKEN не задан)")
+	}
+
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"message": "MTG Stats API запущен",
-			"status":  "OK",
-			"version": "1.0.0",
-			"mode":    gin.Mode(),
+			"message":   "MTG Stats API запущен",
+			"status":    "OK",
+			"version":   "1.0.0",
+			"mode":      gin.Mode(),
+			"auth":      apiToken != "",
+			"auth_hint": "При auth=true все /api/* требуют заголовок: Authorization: Bearer <API_TOKEN>",
 			"endpoints": gin.H{
 				"GET /api/users":                "Список пользователей",
 				"GET /api/users/:id":            "Пользователь по ID",
@@ -136,6 +146,7 @@ func main() {
 	})
 
 	api := router.Group("/api")
+	api.Use(middleware.BearerAuth(apiToken))
 	{
 		api.GET("/users", handlers.GetUsers)
 		api.GET("/users/:id", handlers.GetUser)
