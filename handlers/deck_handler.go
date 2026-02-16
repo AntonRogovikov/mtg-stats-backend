@@ -39,7 +39,7 @@ func getUploadDir() string {
 	return uploadDir
 }
 
-// GetUploadDir возвращает корневую директорию для загрузок (для Static в main). На Railway задайте UPLOAD_DIR=/data.
+// GetUploadDir возвращает корневую директорию для загрузок (для Static в main). В production задайте UPLOAD_DIR.
 func GetUploadDir() string {
 	return getUploadDir()
 }

@@ -15,8 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// corsMiddleware — CORS: при LOCAL_DSN разрешает localhost/127.0.0.1; иначе CORS_ALLOWED_ORIGINS или "*".
-func corsMiddleware(isLocal, isRailway bool) gin.HandlerFunc {
+// corsMiddleware — CORS: CORS_ALLOWED_ORIGINS (через запятую) или localhost при LOCAL_DSN; иначе "*".
+// localhost всегда разрешён для разработки, даже если в списке только production-домен.
+func corsMiddleware(isLocal bool) gin.HandlerFunc {
 	allowedList := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
@@ -28,6 +29,10 @@ func corsMiddleware(isLocal, isRailway bool) gin.HandlerFunc {
 					allowOrigin = origin
 					break
 				}
+			}
+			// Разрешить localhost при разработке, даже если в списке только production
+			if allowOrigin == "" && origin != "" && isLocalhostOrigin(origin) {
+				allowOrigin = origin
 			}
 		} else if isLocal && origin != "" && isLocalhostOrigin(origin) {
 			allowOrigin = origin
@@ -73,18 +78,15 @@ func isLocalhostOrigin(origin string) bool {
 }
 
 func main() {
-	isRailway := os.Getenv("RAILWAY_ENVIRONMENT") != ""
 	isLocal := os.Getenv("LOCAL_DSN") != ""
 
 	if isLocal {
 		log.Println("Запуск в локальном режиме (LOCAL_DSN)")
-	} else if isRailway {
-		log.Println("Запуск в Railway")
-		if os.Getenv("DATABASE_URL") == "" {
-			log.Fatal("DATABASE_URL не задан. Добавьте PostgreSQL в Railway Dashboard")
-		}
 	} else {
-		log.Println("Установите LOCAL_DSN или DATABASE_URL")
+		log.Println("Запуск в production (DATABASE_URL)")
+		if os.Getenv("DATABASE_URL") == "" {
+			log.Fatal("DATABASE_URL не задан")
+		}
 	}
 
 	if err := database.InitDB(); err != nil {
@@ -99,7 +101,7 @@ func main() {
 
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
-	router.Use(corsMiddleware(isLocal, isRailway))
+	router.Use(corsMiddleware(isLocal))
 	router.Static("/uploads", handlers.GetUploadDir())
 
 	apiToken := strings.TrimSpace(os.Getenv("API_TOKEN"))

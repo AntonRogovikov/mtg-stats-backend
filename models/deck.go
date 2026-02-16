@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Deck — колода; ImageURL и AvatarURL — пути вида /uploads/decks/... (файлы на диске или Railway Volume).
+// Deck — колода; ImageURL и AvatarURL — пути вида /uploads/decks/... (файлы на диске).
 type Deck struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	Name      string    `json:"name" gorm:"size:150;not null"`

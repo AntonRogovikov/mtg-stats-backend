@@ -33,15 +33,15 @@ curl -H "Authorization: Bearer your-secret-token" https://your-api.example.com/a
 
 ---
 
-#### Railway (production)
+#### Production (antonrogovikov.duckdns.org)
 
-1. В **Railway Dashboard** → ваш проект → **Variables** добавьте:
+1. На сервере задайте переменные окружения:
    - `API_TOKEN` — сгенерируйте длинный случайный токен (например, `openssl rand -hex 32`).
-   - `DATABASE_URL` — подключается автоматически при добавлении PostgreSQL.
-   - `UPLOAD_DIR=/data` — если используете Volume для файлов.
-   - `CORS_ALLOWED_ORIGINS` — список доменов фронтенда через запятую, например: `https://myapp.vercel.app,https://myapp.com`.
+   - `DATABASE_URL` — строка подключения PostgreSQL.
+   - `UPLOAD_DIR` — путь для хранения изображений (например, `/data`).
+   - `CORS_ALLOWED_ORIGINS` — список доменов фронтенда через запятую, например: `https://antonrogovikov.duckdns.org,http://localhost:5173`.
 
-2. **Важно:** на Railway всегда задавайте `API_TOKEN`, иначе API будет доступен без авторизации.
+2. **Важно:** в production всегда задавайте `API_TOKEN`, иначе API будет доступен без авторизации.
 
 3. На фронтенде сохраняйте токен в переменных окружения (например, `VITE_API_TOKEN` для Vite) и добавляйте заголовок ко всем запросам:
    ```js
@@ -55,7 +55,7 @@ curl -H "Authorization: Bearer your-secret-token" https://your-api.example.com/a
 - **База данных:** `DATABASE_URL` (PostgreSQL) или `LOCAL_DSN` для локального запуска.
 - **Изображения колод** сохраняются на диск. Корень каталога задаётся переменной **`UPLOAD_DIR`**:
   - Локально по умолчанию: `./uploads`
-  - **Railway с Volume:** создайте Volume в Railway, примонтируйте в `/data` и задайте `UPLOAD_DIR=/data`. 
+  - **Production:** задайте `UPLOAD_DIR=/data` (или другой путь) для хранения изображений на диске. 
 
 ## Основные эндпоинты
 
