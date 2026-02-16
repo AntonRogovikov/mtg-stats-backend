@@ -39,10 +39,10 @@ func corsMiddleware(isLocal, isRailway bool) gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
+			c.AbortWithStatus(http.StatusOK)
 			return
 		}
 
@@ -98,6 +98,7 @@ func main() {
 	gin.SetMode(ginMode)
 
 	router := gin.Default()
+	router.SetTrustedProxies(nil)
 	router.Use(corsMiddleware(isLocal, isRailway))
 	router.Static("/uploads", handlers.GetUploadDir())
 
