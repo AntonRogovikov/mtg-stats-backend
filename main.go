@@ -176,11 +176,11 @@ func main() {
 
 		api.GET("/decks", handlers.GetDecks)
 		api.GET("/decks/:id", handlers.GetDeck)
-		api.POST("/decks", handlers.CreateDeck)
-		api.PUT("/decks/:id", handlers.UpdateDeck)
-		api.POST("/decks/:id/image", handlers.UploadDeckImage)
-		api.DELETE("/decks/:id/image", handlers.DeleteDeckImage)
-		api.DELETE("/decks/:id", handlers.DeleteDeck)
+		api.POST("/decks", middleware.RequireAdmin(), handlers.CreateDeck)
+		api.PUT("/decks/:id", middleware.RequireAdmin(), handlers.UpdateDeck)
+		api.POST("/decks/:id/image", middleware.RequireAdmin(), handlers.UploadDeckImage)
+		api.DELETE("/decks/:id/image", middleware.RequireAdmin(), handlers.DeleteDeckImage)
+		api.DELETE("/decks/:id", middleware.RequireAdmin(), handlers.DeleteDeck)
 
 		api.POST("/games", handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
