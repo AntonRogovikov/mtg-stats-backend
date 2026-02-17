@@ -237,6 +237,9 @@ func UploadDeckImage(c *gin.Context) {
 	deck.ImageURL = imageURL
 	avatarURL, err := saveDeckImageFile(avatarHeader, id, "_avatar")
 	if err != nil {
+		if p := pathFromImageURL(imageURL); p != "" {
+			_ = os.Remove(p)
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "avatar: " + err.Error()})
 		return
 	}

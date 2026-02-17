@@ -2,20 +2,37 @@
 
 ## Конфигурация
 
-### Авторизация по токену (API_TOKEN)
+### Авторизация
 
-Все эндпоинты `/api/*` защищены Bearer-токеном, если задана переменная **`API_TOKEN`**.
+Все эндпоинты `/api/*` принимают **либо** `API_TOKEN`, **либо** JWT (от входа пользователя).
 
-| Переменная  | Описание |
-|-------------|----------|
-| `API_TOKEN` | Секретный токен. При запросах к API передавайте: `Authorization: Bearer <API_TOKEN>`. Если не задан — авторизация отключена. |
+| Переменная   | Описание |
+|--------------|----------|
+| `API_TOKEN`  | Секретный токен для доступа к API. Передавайте: `Authorization: Bearer <API_TOKEN>`. |
+| `JWT_SECRET` | Секрет для подписи JWT (если не задан — используется `API_TOKEN`). |
+
+**Два способа авторизации:**
+1. **API_TOKEN** — полный доступ к чтению; для создания/изменения/удаления пользователей требуется JWT.
+2. **JWT** — получается через `POST /api/auth/login` (name, password). Используется для операций с пользователями с проверкой прав.
+
+**Права доступа:**
+- `POST /api/users`, `DELETE /api/users/:id` — только администратор (is_admin).
+- `PUT /api/users/:id` — администратор может менять любого; пользователь — только себя (имя, пароль). Признак `is_admin` меняет только администратор.
 
 **Публичные маршруты (без токена):** `GET /`, `GET /health`, `GET /uploads/*`
 
-**Пример запроса с токеном:**
+**Пример входа и запроса с JWT:**
 ```bash
-curl -H "Authorization: Bearer your-secret-token" https://your-api.example.com/api/users
+# Вход (с API_TOKEN)
+curl -X POST -H "Authorization: Bearer your-api-token" -H "Content-Type: application/json" \
+  -d '{"name":"admin","password":"secret"}' https://your-api.example.com/api/auth/login
+
+# Ответ: {"token":"eyJ...","user":{...}}
+# Далее используйте token в запросах:
+curl -H "Authorization: Bearer <JWT>" https://your-api.example.com/api/users
 ```
+
+**HTTPS:** в production (без `LOCAL_DSN`) запросы по HTTP отклоняются. Учитывается заголовок `X-Forwarded-Proto` при работе за reverse proxy.
 
 ---
 
@@ -59,12 +76,15 @@ curl -H "Authorization: Bearer your-secret-token" https://your-api.example.com/a
 
 ## Основные эндпоинты
 
+### Аутентификация
+- `POST /api/auth/login` — вход (name, password) → JWT. Rate limit: 5 попыток/мин с IP.
+
 ### Пользователи
 - `GET /api/users` — список пользователей
-- `POST /api/users` — создать пользователя
+- `POST /api/users` — создать пользователя (только админ)
 - `GET /api/users/:id` — получить пользователя
-- `PUT /api/users/:id` — обновить пользователя
-- `DELETE /api/users/:id` — удалить пользователя
+- `PUT /api/users/:id` — обновить пользователя (админ — любого; пользователь — себя)
+- `DELETE /api/users/:id` — удалить пользователя (только админ)
 
 ### Колоды
 - `GET /api/decks` — список колод

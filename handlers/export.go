@@ -9,12 +9,23 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/models"
 
 	"github.com/gin-gonic/gin"
 )
+
+// ExportUser — пользователь с password_hash для бэкапа (в API User имеет json:"-" для пароля).
+type ExportUser struct {
+	ID           uint      `json:"id"`
+	Name         string    `json:"name"`
+	PasswordHash string    `json:"password_hash"`
+	IsAdmin      bool      `json:"is_admin"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
 
 // ExportDeck — колода с инлайновыми данными изображений (base64), чтобы клиент мог сохранить файлы локально.
 type ExportDeck struct {
@@ -25,8 +36,8 @@ type ExportDeck struct {
 
 // ExportPayload — полный дамп данных (пользователи, колоды, игры с игроками и ходами).
 type ExportPayload struct {
-	Users []models.User `json:"users"`
-	Decks []ExportDeck  `json:"decks"`
+	Users []ExportUser `json:"users"`
+	Decks []ExportDeck `json:"decks"`
 	Games []models.Game `json:"games"`
 }
 
@@ -53,6 +64,17 @@ func buildExportPayload(c *gin.Context) (*ExportPayload, bool) {
 	if err := db.Order("id ASC").Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список пользователей"})
 		return nil, false
+	}
+	exportUsers := make([]ExportUser, 0, len(users))
+	for _, u := range users {
+		exportUsers = append(exportUsers, ExportUser{
+			ID:           u.ID,
+			Name:         u.Name,
+			PasswordHash: u.PasswordHash,
+			IsAdmin:      u.IsAdmin,
+			CreatedAt:    u.CreatedAt,
+			UpdatedAt:    u.UpdatedAt,
+		})
 	}
 
 	var decks []models.Deck
@@ -87,7 +109,7 @@ func buildExportPayload(c *gin.Context) (*ExportPayload, bool) {
 	}
 
 	payload := &ExportPayload{
-		Users: users,
+		Users: exportUsers,
 		Decks: exportDecks,
 		Games: games,
 	}
@@ -165,36 +187,27 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 		return
 	}
 
-	// Очищаем данные в правильном порядке с учётом внешних ключей.
-	if err := tx.Exec("DELETE FROM game_turns").Error; err != nil {
+	// TRUNCATE RESTART IDENTITY сбрасывает последовательности, чтобы новые ID совпадали с порядком в payload.
+	if err := tx.Exec("TRUNCATE users, decks, games RESTART IDENTITY CASCADE").Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить ходы игр"})
-		return
-	}
-	if err := tx.Exec("DELETE FROM game_players").Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить игроков игр"})
-		return
-	}
-	if err := tx.Exec("DELETE FROM games").Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить игры"})
-		return
-	}
-	if err := tx.Exec("DELETE FROM decks").Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить колоды"})
-		return
-	}
-	if err := tx.Exec("DELETE FROM users").Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить пользователей"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить таблицы", "details": err.Error()})
 		return
 	}
 
-	// Восстанавливаем пользователей.
+	// Восстанавливаем пользователей (с password_hash и is_admin из бэкапа).
 	if len(payload.Users) > 0 {
-		if err := tx.Create(&payload.Users).Error; err != nil {
+		users := make([]models.User, 0, len(payload.Users))
+		for _, eu := range payload.Users {
+			users = append(users, models.User{
+				ID:           eu.ID,
+				Name:         eu.Name,
+				PasswordHash: eu.PasswordHash,
+				IsAdmin:      eu.IsAdmin,
+				CreatedAt:    eu.CreatedAt,
+				UpdatedAt:    eu.UpdatedAt,
+			})
+		}
+		if err := tx.Create(&users).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось восстановить пользователей"})
 			return

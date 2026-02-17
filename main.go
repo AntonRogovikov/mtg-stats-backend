@@ -68,6 +68,14 @@ func parseCORSOrigins(s string) []string {
 	return out
 }
 
+func getJWTSecret() string {
+	s := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if s != "" {
+		return s
+	}
+	return os.Getenv("API_TOKEN")
+}
+
 func isLocalhostOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -102,6 +110,9 @@ func main() {
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
 	router.Use(corsMiddleware(isLocal))
+	if !isLocal {
+		router.Use(middleware.RequireHTTPS())
+	}
 	router.Static("/uploads", handlers.GetUploadDir())
 
 	apiToken := strings.TrimSpace(os.Getenv("API_TOKEN"))
@@ -120,6 +131,7 @@ func main() {
 			"auth":      apiToken != "",
 			"auth_hint": "При auth=true все /api/* требуют заголовок: Authorization: Bearer <API_TOKEN>",
 			"endpoints": gin.H{
+				"POST /api/auth/login":          "Вход (name, password) → JWT",
 				"GET /api/users":                "Список пользователей",
 				"GET /api/users/:id":            "Пользователь по ID",
 				"POST /api/users":               "Создать пользователя",
@@ -148,14 +160,19 @@ func main() {
 		})
 	})
 
+	jwtSecret := getJWTSecret()
+
+	// Вход — без авторизации (токена ещё нет).
+	router.POST("/api/auth/login", handlers.Login)
+
 	api := router.Group("/api")
-	api.Use(middleware.BearerAuth(apiToken))
+	api.Use(middleware.BearerOrJWTAuth(apiToken, jwtSecret))
 	{
 		api.GET("/users", handlers.GetUsers)
 		api.GET("/users/:id", handlers.GetUser)
-		api.POST("/users", handlers.CreateUser)
-		api.PUT("/users/:id", handlers.UpdateUser)
-		api.DELETE("/users/:id", handlers.DeleteUser)
+		api.POST("/users", middleware.RequireAdmin(), handlers.CreateUser)
+		api.PUT("/users/:id", middleware.RequireUser(), handlers.UpdateUser)
+		api.DELETE("/users/:id", middleware.RequireAdmin(), handlers.DeleteUser)
 
 		api.GET("/decks", handlers.GetDecks)
 		api.GET("/decks/:id", handlers.GetDeck)
@@ -166,9 +183,8 @@ func main() {
 		api.DELETE("/decks/:id", handlers.DeleteDeck)
 
 		api.POST("/games", handlers.CreateGame)
-		api.POST("/games/", handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
-		api.DELETE("/games", handlers.ClearGamesAndTurns)
+		api.DELETE("/games", middleware.RequireAdmin(), handlers.ClearGamesAndTurns)
 		api.GET("/games/active", handlers.GetActiveGame)
 		api.GET("/games/:id", handlers.GetGame)
 		api.PUT("/games/active", handlers.UpdateActiveGame)
@@ -177,8 +193,8 @@ func main() {
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)
 
-		api.GET("/export/all", handlers.ExportAllData)
-		api.POST("/import/all", handlers.ImportAllData)
+		api.GET("/export/all", middleware.RequireAdmin(), handlers.ExportAllData)
+		api.POST("/import/all", middleware.RequireAdmin(), handlers.ImportAllData)
 	}
 
 	router.NoRoute(func(c *gin.Context) {
