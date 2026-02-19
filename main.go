@@ -131,31 +131,32 @@ func main() {
 			"auth":      apiToken != "",
 			"auth_hint": "При auth=true все /api/* требуют заголовок: Authorization: Bearer <API_TOKEN>",
 			"endpoints": gin.H{
-				"POST /api/auth/login":          "Вход (name, password) → JWT",
-				"GET /api/users":                "Список пользователей",
-				"GET /api/users/:id":            "Пользователь по ID",
-				"POST /api/users":               "Создать пользователя",
-				"PUT /api/users/:id":            "Обновить пользователя",
-				"DELETE /api/users/:id":         "Удалить пользователя",
-				"GET /api/decks":                "Список колод",
-				"GET /api/decks/:id":            "Колода по ID",
-				"POST /api/decks":               "Создать колоду",
-				"PUT /api/decks/:id":            "Обновить колоду",
-				"POST /api/decks/:id/image":     "Загрузить изображение и аватар колоды (multipart: image, avatar)",
-				"DELETE /api/decks/:id/image":   "Удалить изображение и аватар колоды",
-				"DELETE /api/decks/:id":         "Удалить колоду",
-				"GET /api/games":                "Список игр",
-				"GET /api/games/active":         "Активная игра",
-				"GET /api/games/:id":            "Игра по ID",
-				"POST /api/games":               "Создать игру",
-				"PUT /api/games/active":         "Обновить активную игру",
-				"POST /api/games/active/finish": "Завершить активную игру",
-				"GET /api/stats/players":        "Статистика игроков",
-				"GET /api/stats/decks":          "Статистика колод",
-				"GET /api/export/all":           "Экспорт всех данных (пользователи, колоды, игры, изображения в base64) в gzip-архиве JSON",
-				"POST /api/import/all":          "Полная замена всех данных из gzip-архива JSON",
-				"DELETE /api/games":             "Полная очистка игр и ходов",
-				"GET /health":                   "Проверка состояния",
+				"POST /api/auth/login":              "Вход (name, password) → JWT",
+				"GET /api/users":                    "Список пользователей",
+				"GET /api/users/:id":                "Пользователь по ID",
+				"POST /api/users":                   "Создать пользователя",
+				"PUT /api/users/:id":                "Обновить пользователя",
+				"DELETE /api/users/:id":             "Удалить пользователя",
+				"GET /api/decks":                    "Список колод",
+				"GET /api/decks/:id":                "Колода по ID",
+				"POST /api/decks":                   "Создать колоду",
+				"PUT /api/decks/:id":                "Обновить колоду",
+				"POST /api/decks/:id/image":         "Загрузить изображение и аватар колоды (multipart: image, avatar)",
+				"DELETE /api/decks/:id/image":       "Удалить изображение и аватар колоды",
+				"DELETE /api/decks/:id":             "Удалить колоду",
+				"GET /api/games":                    "Список игр",
+				"GET /api/games/active":             "Активная игра",
+				"POST /api/games/active/start-turn": "Начать ход (серверное время)",
+				"GET /api/games/:id":                "Игра по ID",
+				"POST /api/games":                   "Создать игру",
+				"PUT /api/games/active":             "Обновить активную игру",
+				"POST /api/games/active/finish":     "Завершить активную игру",
+				"GET /api/stats/players":            "Статистика игроков",
+				"GET /api/stats/decks":              "Статистика колод",
+				"GET /api/export/all":               "Экспорт всех данных (пользователи, колоды, игры, изображения в base64) в gzip-архиве JSON",
+				"POST /api/import/all":              "Полная замена всех данных из gzip-архива JSON",
+				"DELETE /api/games":                 "Полная очистка игр и ходов",
+				"GET /health":                       "Проверка состояния",
 			},
 		})
 	})
@@ -186,8 +187,11 @@ func main() {
 		api.GET("/games", handlers.GetGames)
 		api.DELETE("/games", middleware.RequireAdmin(), handlers.ClearGamesAndTurns)
 		api.GET("/games/active", handlers.GetActiveGame)
-		api.GET("/games/:id", handlers.GetGame)
 		api.PUT("/games/active", handlers.UpdateActiveGame)
+		api.POST("/games/active/pause", handlers.PauseGame)
+		api.POST("/games/active/resume", handlers.ResumeGame)
+		api.POST("/games/active/start-turn", handlers.StartTurn)
+		api.GET("/games/:id", handlers.GetGame)
 		api.POST("/games/active/finish", handlers.FinishGame)
 
 		api.GET("/stats/players", handlers.GetPlayerStats)

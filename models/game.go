@@ -2,7 +2,9 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,20 +33,25 @@ func (GameTurn) TableName() string { return "game_turns" }
 
 // Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
-	ID               uint         `json:"id" gorm:"primaryKey"`
-	StartTime        time.Time    `json:"start_time"`
-	EndTime          *time.Time   `json:"end_time,omitempty"`
-	TurnLimitSeconds int          `json:"turn_limit_seconds"`
-	FirstMoveTeam    int          `json:"first_move_team"`
-	Team1Name        string       `json:"team1_name,omitempty"`
-	Team2Name        string       `json:"team2_name,omitempty"`
-	Players          []GamePlayer `json:"players" gorm:"foreignKey:GameID"`
-	Turns            []GameTurn   `json:"turns" gorm:"foreignKey:GameID"`
-	CurrentTurnTeam  int          `json:"current_turn_team"`
-	CurrentTurnStart *time.Time   `json:"current_turn_start,omitempty"`
-	WinningTeam      *int         `json:"winning_team,omitempty"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	ID                        uint         `json:"id" gorm:"primaryKey"`
+	StartTime                 time.Time    `json:"start_time"`
+	EndTime                   *time.Time   `json:"end_time,omitempty"`
+	TurnLimitSeconds          int          `json:"turn_limit_seconds"`
+	FirstMoveTeam             int          `json:"first_move_team"`
+	Team1Name                 string       `json:"team1_name,omitempty"`
+	Team2Name                 string       `json:"team2_name,omitempty"`
+	Players                   []GamePlayer `json:"players" gorm:"foreignKey:GameID"`
+	Turns                     []GameTurn   `json:"turns" gorm:"foreignKey:GameID"`
+	CurrentTurnTeam           int          `json:"current_turn_team"`
+	CurrentTurnStart           *time.Time   `json:"current_turn_start,omitempty"`
+	IsPaused                  bool         `json:"is_paused"`
+	PauseStartedAt            *time.Time   `json:"pause_started_at,omitempty"`
+	TotalPauseDurationSeconds int          `json:"total_pause_duration_seconds"`
+	TeamTimeLimitSeconds      int          `json:"team_time_limit_seconds"`
+	IsTechnicalDefeat         bool         `json:"is_technical_defeat"`
+	WinningTeam               *int         `json:"winning_team,omitempty"`
+	CreatedAt                 time.Time    `json:"created_at"`
+	UpdatedAt                 time.Time    `json:"updated_at"`
 }
 
 // flexUint — JSON: число, строка или null (совместимость с Flutter).
@@ -86,22 +93,56 @@ type CreateGamePlayerInput struct {
 
 // CreateGameRequest — запрос создания игры.
 type CreateGameRequest struct {
-	TurnLimitSeconds int                     `json:"turn_limit_seconds"`
-	FirstMoveTeam    int                     `json:"first_move_team"`
-	Team1Name        string                  `json:"team1_name,omitempty"`
-	Team2Name        string                  `json:"team2_name,omitempty"`
-	Players          []CreateGamePlayerInput `json:"players"`
+	TurnLimitSeconds      int                     `json:"turn_limit_seconds"`
+	TeamTimeLimitSeconds  int                     `json:"team_time_limit_seconds"`
+	FirstMoveTeam         int                     `json:"first_move_team"`
+	Team1Name             string                  `json:"team1_name,omitempty"`
+	Team2Name             string                  `json:"team2_name,omitempty"`
+	Players               []CreateGamePlayerInput `json:"players"`
 }
 
 // FinishGameRequest — завершение игры; winning_team 1 или 2.
 type FinishGameRequest struct {
-	WinningTeam int `json:"winning_team"`
+	WinningTeam       int  `json:"winning_team"`
+	IsTechnicalDefeat bool `json:"is_technical_defeat"`
+}
+
+// flexTime — время из JSON (RFC3339, RFC3339Nano, ISO8601 от Flutter).
+type flexTime struct{ T *time.Time }
+
+func (f *flexTime) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		f.T = nil
+		return nil
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.999", // Flutter без суффикса часового пояса
+		"2006-01-02T15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			utc := t.UTC()
+			f.T = &utc
+			return nil
+		}
+	}
+	var t time.Time
+	if err := json.Unmarshal(b, &t); err != nil {
+		return fmt.Errorf("invalid time format %q: %w", s, err)
+	}
+	utc := t.UTC()
+	f.T = &utc
+	return nil
 }
 
 // UpdateActiveGameRequest — обновление активной игры (текущий ход, ходы).
 type UpdateActiveGameRequest struct {
-	CurrentTurnTeam  int        `json:"current_turn_team"`
-	CurrentTurnStart *time.Time `json:"current_turn_start,omitempty"`
+	CurrentTurnTeam  int      `json:"current_turn_team"`
+	CurrentTurnStart *flexTime `json:"current_turn_start,omitempty"`
 	Turns            []GameTurn `json:"turns"`
 }
 

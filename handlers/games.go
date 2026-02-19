@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -66,9 +67,10 @@ func CreateGame(c *gin.Context) {
 
 	now := time.Now().UTC()
 	game := &models.Game{
-		StartTime:         now,
-		TurnLimitSeconds:  req.TurnLimitSeconds,
-		FirstMoveTeam:     req.FirstMoveTeam,
+		StartTime:            now,
+		TurnLimitSeconds:     req.TurnLimitSeconds,
+		TeamTimeLimitSeconds: req.TeamTimeLimitSeconds,
+		FirstMoveTeam:        req.FirstMoveTeam,
 		Team1Name:         req.Team1Name,
 		Team2Name:         req.Team2Name,
 		CurrentTurnTeam:   req.FirstMoveTeam,
@@ -108,6 +110,96 @@ func CreateGame(c *gin.Context) {
 	c.JSON(http.StatusCreated, game)
 }
 
+// PauseGame — поставить партию на паузу; 404 если нет активной.
+func PauseGame(c *gin.Context) {
+	db := database.GetDB()
+	var game models.Game
+	if err := db.Where("end_time IS NULL").First(&game).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
+		return
+	}
+	if game.IsPaused {
+		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+		c.JSON(http.StatusOK, &game)
+		return
+	}
+	now := time.Now().UTC()
+	game.IsPaused = true
+	game.PauseStartedAt = &now
+	if err := db.Model(&game).Updates(map[string]interface{}{
+		"is_paused":        true,
+		"pause_started_at": &now,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось поставить на паузу"})
+		return
+	}
+	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	c.JSON(http.StatusOK, &game)
+}
+
+// ResumeGame — снять паузу; время паузы не идёт в общее и в ход; 404 если нет активной.
+func ResumeGame(c *gin.Context) {
+	db := database.GetDB()
+	var game models.Game
+	if err := db.Where("end_time IS NULL").First(&game).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
+		return
+	}
+	if !game.IsPaused || game.PauseStartedAt == nil {
+		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+		c.JSON(http.StatusOK, &game)
+		return
+	}
+	now := time.Now().UTC()
+	pauseDuration := now.Sub(*game.PauseStartedAt)
+	game.TotalPauseDurationSeconds += int(pauseDuration.Seconds())
+	// Сдвигаем current_turn_start на длительность паузы, чтобы таймер хода считал корректно.
+	if game.CurrentTurnStart != nil {
+		adjusted := game.CurrentTurnStart.Add(pauseDuration)
+		game.CurrentTurnStart = &adjusted
+	}
+	game.IsPaused = false
+	game.PauseStartedAt = nil
+	if err := db.Model(&game).UpdateColumn("is_paused", false).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
+		return
+	}
+	if err := db.Model(&game).UpdateColumn("pause_started_at", nil).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
+		return
+	}
+	if err := db.Model(&game).UpdateColumn("total_pause_duration_seconds", game.TotalPauseDurationSeconds).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
+		return
+	}
+	if game.CurrentTurnStart != nil {
+		if err := db.Model(&game).UpdateColumn("current_turn_start", game.CurrentTurnStart).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
+			return
+		}
+	}
+	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	c.JSON(http.StatusOK, &game)
+}
+
+// StartTurn — установить начало текущего хода (серверное время); 404 если нет активной игры.
+func StartTurn(c *gin.Context) {
+	db := database.GetDB()
+	var game models.Game
+	if err := db.Where("end_time IS NULL").First(&game).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
+		return
+	}
+	now := time.Now().UTC()
+	game.CurrentTurnStart = &now
+	if err := db.Model(&game).UpdateColumn("current_turn_start", game.CurrentTurnStart).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить игру"})
+		return
+	}
+	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	c.JSON(http.StatusOK, &game)
+}
+
 // GetActiveGame — текущая активная игра (end_time IS NULL); 404 если нет.
 func GetActiveGame(c *gin.Context) {
 	db := database.GetDB()
@@ -135,21 +227,66 @@ func UpdateActiveGame(c *gin.Context) {
 	}
 
 	game.CurrentTurnTeam = req.CurrentTurnTeam
-	game.CurrentTurnStart = req.CurrentTurnStart
-	if err := db.Model(&game).Updates(map[string]interface{}{
-		"current_turn_team":  game.CurrentTurnTeam,
-		"current_turn_start": game.CurrentTurnStart,
-	}).Error; err != nil {
+	// Используем серверное время для начала хода — так таймер сохранится при перезагрузке страницы.
+	if req.CurrentTurnStart != nil && req.CurrentTurnStart.T != nil {
+		now := time.Now().UTC()
+		game.CurrentTurnStart = &now
+	} else {
+		game.CurrentTurnStart = nil
+	}
+	// UpdateColumn гарантирует запись в БД (Updates с map иногда пропускает *time.Time).
+	if err := db.Model(&game).UpdateColumn("current_turn_team", game.CurrentTurnTeam).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить игру"})
+		return
+	}
+	if err := db.Model(&game).UpdateColumn("current_turn_start", game.CurrentTurnStart).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить игру"})
 		return
 	}
 
 	if len(req.Turns) > 0 {
-		db.Where("game_id = ?", game.ID).Delete(&models.GameTurn{})
-		for i := range req.Turns {
-			req.Turns[i].GameID = game.ID
+		tx := db.Begin()
+		if tx.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить ходы"})
+			return
 		}
-		if err := db.Create(&req.Turns).Error; err != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				tx.Rollback()
+			}
+		}()
+
+		if err := tx.Where("game_id = ?", game.ID).Delete(&models.GameTurn{}).Error; err != nil {
+			tx.Rollback()
+			log.Printf("UpdateActiveGame: delete turns: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить ходы"})
+			return
+		}
+		// Сбрасываем sequence: следующий nextval() вернёт max(id)+1, избегая дубликатов.
+		if err := tx.Exec("SELECT setval(pg_get_serial_sequence('game_turns', 'id'), COALESCE((SELECT MAX(id) FROM game_turns), 0))").Error; err != nil {
+			log.Printf("UpdateActiveGame: reset sequence (ignored): %v", err)
+		}
+		// Создаём новые записи, явно исключая ID.
+		turnsToCreate := make([]models.GameTurn, len(req.Turns))
+		for i := range req.Turns {
+			turnsToCreate[i] = models.GameTurn{
+				GameID:     game.ID,
+				TeamNumber: req.Turns[i].TeamNumber,
+				Duration:   req.Turns[i].Duration,
+				Overtime:   req.Turns[i].Overtime,
+			}
+		}
+		if err := tx.Omit("ID").Create(&turnsToCreate).Error; err != nil {
+			tx.Rollback()
+			log.Printf("UpdateActiveGame: create turns: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Не удалось обновить ходы",
+				"detail": err.Error(),
+			})
+			return
+		}
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("UpdateActiveGame: commit: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить ходы"})
 			return
 		}
@@ -181,9 +318,11 @@ func FinishGame(c *gin.Context) {
 	now := time.Now().UTC()
 	game.EndTime = &now
 	game.WinningTeam = &req.WinningTeam
+	game.IsTechnicalDefeat = req.IsTechnicalDefeat
 	if err := db.Model(&game).Updates(map[string]interface{}{
-		"end_time":     game.EndTime,
-		"winning_team": game.WinningTeam,
+		"end_time":             game.EndTime,
+		"winning_team":         game.WinningTeam,
+		"is_technical_defeat":  game.IsTechnicalDefeat,
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось завершить игру"})
 		return
