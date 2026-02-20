@@ -7,13 +7,22 @@ import (
 	"time"
 
 	"mtg-stats-backend/database"
+	"mtg-stats-backend/middleware"
 	"mtg-stats-backend/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-// GetGames — список игр с игроками и ходами, сортировка по updated_at DESC.
+func gameViewer(c *gin.Context) *middleware.UserInfo {
+	me, hasUser := middleware.GetUserInfo(c)
+	if !hasUser {
+		return nil
+	}
+	return &me
+}
+
+// GetGames — список игр с игроками и ходами; is_admin в players маскируется.
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
@@ -22,10 +31,15 @@ func GetGames(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
 	}
-	c.JSON(http.StatusOK, games)
+	viewer := gameViewer(c)
+	resp := make([]models.GameResponse, len(games))
+	for i := range games {
+		resp[i] = gameToResponse(games[i], viewer)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
-// GetGame — игра по id с игроками и ходами; 404 если не найдена.
+// GetGame — игра по id с игроками и ходами; is_admin в players маскируется.
 func GetGame(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil || id == 0 {
@@ -38,7 +52,7 @@ func GetGame(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
 		return
 	}
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // CreateGame — создание активной игры; first_move_team 1 или 2; 409 если активная уже есть.
@@ -107,7 +121,7 @@ func CreateGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
-	c.JSON(http.StatusCreated, game)
+	c.JSON(http.StatusCreated, gameToResponse(*game, gameViewer(c)))
 }
 
 // PauseGame — поставить партию на паузу; 404 если нет активной.
@@ -120,7 +134,7 @@ func PauseGame(c *gin.Context) {
 	}
 	if game.IsPaused {
 		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-		c.JSON(http.StatusOK, &game)
+		c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 		return
 	}
 	now := time.Now().UTC()
@@ -134,7 +148,7 @@ func PauseGame(c *gin.Context) {
 		return
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // ResumeGame — снять паузу; время паузы не идёт в общее и в ход; 404 если нет активной.
@@ -147,39 +161,30 @@ func ResumeGame(c *gin.Context) {
 	}
 	if !game.IsPaused || game.PauseStartedAt == nil {
 		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-		c.JSON(http.StatusOK, &game)
+		c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 		return
 	}
 	now := time.Now().UTC()
 	pauseDuration := now.Sub(*game.PauseStartedAt)
 	game.TotalPauseDurationSeconds += int(pauseDuration.Seconds())
-	// Сдвигаем current_turn_start на длительность паузы, чтобы таймер хода считал корректно.
 	if game.CurrentTurnStart != nil {
 		adjusted := game.CurrentTurnStart.Add(pauseDuration)
 		game.CurrentTurnStart = &adjusted
 	}
 	game.IsPaused = false
 	game.PauseStartedAt = nil
-	if err := db.Model(&game).UpdateColumn("is_paused", false).Error; err != nil {
+	updates := map[string]interface{}{
+		"is_paused":                   false,
+		"pause_started_at":            nil,
+		"total_pause_duration_seconds": game.TotalPauseDurationSeconds,
+		"current_turn_start":          game.CurrentTurnStart,
+	}
+	if err := db.Model(&game).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
 		return
-	}
-	if err := db.Model(&game).UpdateColumn("pause_started_at", nil).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
-		return
-	}
-	if err := db.Model(&game).UpdateColumn("total_pause_duration_seconds", game.TotalPauseDurationSeconds).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
-		return
-	}
-	if game.CurrentTurnStart != nil {
-		if err := db.Model(&game).UpdateColumn("current_turn_start", game.CurrentTurnStart).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
-			return
-		}
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // StartTurn — установить начало текущего хода (серверное время); 404 если нет активной игры.
@@ -197,7 +202,7 @@ func StartTurn(c *gin.Context) {
 		return
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // GetActiveGame — текущая активная игра (end_time IS NULL); 404 если нет.
@@ -208,7 +213,7 @@ func GetActiveGame(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // UpdateActiveGame — обновление текущего хода и списка ходов активной игры; 404 если нет активной.
@@ -262,11 +267,9 @@ func UpdateActiveGame(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить ходы"})
 			return
 		}
-		// Сбрасываем sequence: следующий nextval() вернёт max(id)+1, избегая дубликатов.
 		if err := tx.Exec("SELECT setval(pg_get_serial_sequence('game_turns', 'id'), COALESCE((SELECT MAX(id) FROM game_turns), 0))").Error; err != nil {
 			log.Printf("UpdateActiveGame: reset sequence (ignored): %v", err)
 		}
-		// Создаём новые записи, явно исключая ID.
 		turnsToCreate := make([]models.GameTurn, len(req.Turns))
 		for i := range req.Turns {
 			turnsToCreate[i] = models.GameTurn{
@@ -293,7 +296,7 @@ func UpdateActiveGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // FinishGame — завершение активной игры; winning_team 1 или 2; 404 если нет активной.
@@ -329,7 +332,7 @@ func FinishGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, &game)
+	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
 }
 
 // ClearGamesAndTurns — полная очистка таблиц games, game_players и game_turns.

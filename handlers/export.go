@@ -17,11 +17,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ExportUser — пользователь с password_hash для бэкапа (в API User имеет json:"-" для пароля).
+// ExportUser — пользователь для экспорта; password_hash только при ?include_passwords=true.
 type ExportUser struct {
 	ID           uint      `json:"id"`
 	Name         string    `json:"name"`
-	PasswordHash string    `json:"password_hash"`
+	PasswordHash string    `json:"password_hash,omitempty"`
 	IsAdmin      bool      `json:"is_admin"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -57,7 +57,8 @@ func fileBase64FromImageURL(imageURL string) (string, error) {
 }
 
 // buildExportPayload загружает все данные из БД и формирует экспортную структуру.
-func buildExportPayload(c *gin.Context) (*ExportPayload, bool) {
+// includePasswords: при true — password_hash в ExportUser (полный бэкап); при false — пусто (безопасный экспорт).
+func buildExportPayload(c *gin.Context, includePasswords bool) (*ExportPayload, bool) {
 	db := database.GetDB()
 
 	var users []models.User
@@ -67,14 +68,17 @@ func buildExportPayload(c *gin.Context) (*ExportPayload, bool) {
 	}
 	exportUsers := make([]ExportUser, 0, len(users))
 	for _, u := range users {
-		exportUsers = append(exportUsers, ExportUser{
-			ID:           u.ID,
-			Name:         u.Name,
-			PasswordHash: u.PasswordHash,
-			IsAdmin:      u.IsAdmin,
-			CreatedAt:    u.CreatedAt,
-			UpdatedAt:    u.UpdatedAt,
-		})
+		eu := ExportUser{
+			ID:      u.ID,
+			Name:    u.Name,
+			IsAdmin: u.IsAdmin,
+			CreatedAt: u.CreatedAt,
+			UpdatedAt: u.UpdatedAt,
+		}
+		if includePasswords {
+			eu.PasswordHash = u.PasswordHash
+		}
+		exportUsers = append(exportUsers, eu)
 	}
 
 	var decks []models.Deck
@@ -117,8 +121,10 @@ func buildExportPayload(c *gin.Context) (*ExportPayload, bool) {
 }
 
 // ExportAllData — экспорт всех данных БД (users, decks, games) с инлайновыми картинками колод в gzip-архиве JSON.
+// Query: include_passwords=true — включить хеши паролей (полный бэкап); по умолчанию — без паролей.
 func ExportAllData(c *gin.Context) {
-	payload, ok := buildExportPayload(c)
+	includePasswords := c.Query("include_passwords") == "true"
+	payload, ok := buildExportPayload(c, includePasswords)
 	if !ok {
 		return
 	}
@@ -178,7 +184,8 @@ func restoreDeckImagesFromExport(decks []ExportDeck) error {
 	return nil
 }
 
-// importAllDataFromPayload — общая логика замены всех данных и картинок по уже разобранному payload.
+// importAllDataFromPayload выполняет TRUNCATE таблиц, восстанавливает users/decks/games из payload,
+// затем записывает изображения колод на диск из base64.
 func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 	db := database.GetDB()
 	tx := db.Begin()

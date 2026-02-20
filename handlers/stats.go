@@ -18,6 +18,7 @@ func teamForPlayerIndex(i int) int {
 }
 
 // GetPlayerStats — агрегат по игрокам по завершённым играм (победы, ходы, лучшая колода).
+// Загружает все завершённые игры в память; при большом объёме данных рассмотреть SQL-агрегацию.
 func GetPlayerStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
@@ -142,6 +143,7 @@ func GetPlayerStats(c *gin.Context) {
 }
 
 // GetDeckStats — агрегат по колодам по завершённым играм (игры, победы, %).
+// Загружает все завершённые игры в память; при большом объёме данных рассмотреть SQL-агрегацию.
 func GetDeckStats(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game

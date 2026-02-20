@@ -1,4 +1,5 @@
-// Package database — подключение к PostgreSQL, пул соединений и миграции GORM.
+// Package database — инициализация подключения к PostgreSQL через GORM.
+// Настраивает пул (MaxIdleConns=5, MaxOpenConns=20) и выполняет AutoMigrate для User, Deck, Game, GamePlayer, GameTurn.
 package database
 
 import (

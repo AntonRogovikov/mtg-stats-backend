@@ -31,6 +31,37 @@ type GameTurn struct {
 
 func (GameTurn) TableName() string { return "game_turns" }
 
+// GamePlayerResponse — игрок в ответе API; user.is_admin маскируется для не-админов.
+type GamePlayerResponse struct {
+	ID       uint         `json:"id"`
+	User     UserResponse `json:"user"`
+	DeckID   int          `json:"deck_id"`
+	DeckName string       `json:"deck_name"`
+}
+
+// GameResponse — игра в ответе API; players[].user.is_admin маскируется для не-админов.
+type GameResponse struct {
+	ID                        uint                  `json:"id"`
+	StartTime                 time.Time             `json:"start_time"`
+	EndTime                   *time.Time            `json:"end_time,omitempty"`
+	TurnLimitSeconds          int                   `json:"turn_limit_seconds"`
+	FirstMoveTeam             int                   `json:"first_move_team"`
+	Team1Name                 string                `json:"team1_name,omitempty"`
+	Team2Name                 string                `json:"team2_name,omitempty"`
+	Players                   []GamePlayerResponse  `json:"players"`
+	Turns                     []GameTurn            `json:"turns"`
+	CurrentTurnTeam           int                   `json:"current_turn_team"`
+	CurrentTurnStart          *time.Time            `json:"current_turn_start,omitempty"`
+	IsPaused                  bool                  `json:"is_paused"`
+	PauseStartedAt            *time.Time           `json:"pause_started_at,omitempty"`
+	TotalPauseDurationSeconds int                   `json:"total_pause_duration_seconds"`
+	TeamTimeLimitSeconds      int                   `json:"team_time_limit_seconds"`
+	IsTechnicalDefeat         bool                  `json:"is_technical_defeat"`
+	WinningTeam               *int                  `json:"winning_team,omitempty"`
+	CreatedAt                 time.Time             `json:"created_at"`
+	UpdatedAt                 time.Time             `json:"updated_at"`
+}
+
 // Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
 	ID                        uint         `json:"id" gorm:"primaryKey"`

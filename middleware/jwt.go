@@ -11,6 +11,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const bearerPrefix = "Bearer "
+
 // ContextKey — ключ для хранения пользователя в контексте.
 type ContextKey string
 
@@ -23,14 +25,9 @@ type UserInfo struct {
 	IsAdmin bool
 }
 
-// BearerOrJWTAuth — принимает API_TOKEN или JWT. При JWT извлекает пользователя в контекст.
+// BearerOrJWTAuth — обязательная авторизация: API_TOKEN или JWT. API_TOKEN задаётся всегда; Bearer подтверждает запрос от приложения.
 func BearerOrJWTAuth(apiToken string, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if apiToken == "" && jwtSecret == "" {
-			c.Next()
-			return
-		}
-
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -52,13 +49,12 @@ func BearerOrJWTAuth(apiToken string, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// Сначала проверяем API_TOKEN
 		if apiToken != "" && token == apiToken {
+			c.Set(string(UserContextKey), UserInfo{IsAdmin: true})
 			c.Next()
 			return
 		}
 
-		// Иначе пробуем как JWT
 		if jwtSecret != "" {
 			var claims models.UserClaims
 			tok, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (interface{}, error) {

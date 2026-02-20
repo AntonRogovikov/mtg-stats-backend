@@ -23,6 +23,15 @@ type UserRequest struct {
 	IsAdmin  *bool  `json:"is_admin,omitempty"` // опционально; при обновлении nil = не менять
 }
 
+// UserResponse — ответ API; is_admin показывается только админу или самому пользователю.
+type UserResponse struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	IsAdmin   *bool     `json:"is_admin,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // UserClaims — claims JWT (id, name, is_admin).
 type UserClaims struct {
 	UserID  uint   `json:"uid"`

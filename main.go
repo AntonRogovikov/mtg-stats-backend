@@ -1,4 +1,5 @@
-// Package main — точка входа MTG Stats API (пользователи, колоды, игры, статистика).
+// Package main — точка входа MTG Stats API.
+// Регистрирует маршруты, CORS, middleware (auth, HTTPS), статические файлы загрузок.
 package main
 
 import (
@@ -116,11 +117,10 @@ func main() {
 	router.Static("/uploads", handlers.GetUploadDir())
 
 	apiToken := strings.TrimSpace(os.Getenv("API_TOKEN"))
-	if apiToken != "" {
-		log.Println("API защищён Bearer-токеном (API_TOKEN)")
-	} else {
-		log.Println("API без авторизации (API_TOKEN не задан)")
+	if apiToken == "" {
+		log.Fatal("API_TOKEN обязателен. Задайте переменную окружения API_TOKEN.")
 	}
+	log.Println("API защищён Bearer-токеном (API_TOKEN)")
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -129,7 +129,7 @@ func main() {
 			"version":   "1.0.0",
 			"mode":      gin.Mode(),
 			"auth":      apiToken != "",
-			"auth_hint": "При auth=true все /api/* требуют заголовок: Authorization: Bearer <API_TOKEN>",
+			"auth_hint": "При auth=true все /api/* требуют заголовок: Authorization: Bearer <API_TOKEN или JWT>",
 			"endpoints": gin.H{
 				"POST /api/auth/login":              "Вход (name, password) → JWT",
 				"GET /api/users":                    "Список пользователей",
@@ -163,7 +163,6 @@ func main() {
 
 	jwtSecret := getJWTSecret()
 
-	// Вход — без авторизации (токена ещё нет).
 	router.POST("/api/auth/login", handlers.Login)
 
 	api := router.Group("/api")
@@ -183,16 +182,16 @@ func main() {
 		api.DELETE("/decks/:id/image", middleware.RequireAdmin(), handlers.DeleteDeckImage)
 		api.DELETE("/decks/:id", middleware.RequireAdmin(), handlers.DeleteDeck)
 
-		api.POST("/games", handlers.CreateGame)
+		api.POST("/games", middleware.RequireAdmin(), handlers.CreateGame)
 		api.GET("/games", handlers.GetGames)
 		api.DELETE("/games", middleware.RequireAdmin(), handlers.ClearGamesAndTurns)
 		api.GET("/games/active", handlers.GetActiveGame)
-		api.PUT("/games/active", handlers.UpdateActiveGame)
-		api.POST("/games/active/pause", handlers.PauseGame)
-		api.POST("/games/active/resume", handlers.ResumeGame)
-		api.POST("/games/active/start-turn", handlers.StartTurn)
+		api.PUT("/games/active", middleware.RequireAdmin(), handlers.UpdateActiveGame)
+		api.POST("/games/active/pause", middleware.RequireAdmin(), handlers.PauseGame)
+		api.POST("/games/active/resume", middleware.RequireAdmin(), handlers.ResumeGame)
+		api.POST("/games/active/start-turn", middleware.RequireAdmin(), handlers.StartTurn)
 		api.GET("/games/:id", handlers.GetGame)
-		api.POST("/games/active/finish", handlers.FinishGame)
+		api.POST("/games/active/finish", middleware.RequireAdmin(), handlers.FinishGame)
 
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)

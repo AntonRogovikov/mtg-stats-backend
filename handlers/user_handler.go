@@ -27,7 +27,7 @@ func hashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// GetUsers — список пользователей, сортировка по id DESC.
+// GetUsers — список пользователей, сортировка по id DESC. is_admin скрыт для не-админов.
 func GetUsers(c *gin.Context) {
 	db := database.GetDB()
 	var users []models.User
@@ -35,10 +35,15 @@ func GetUsers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список пользователей"})
 		return
 	}
-	c.JSON(http.StatusOK, users)
+	me, _ := middleware.GetUserInfo(c)
+	resp := make([]models.UserResponse, len(users))
+	for i := range users {
+		resp[i] = userToResponse(users[i], &me)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
-// GetUser — пользователь по id; 404 если не найден.
+// GetUser — пользователь по id; 404 если не найден. is_admin скрыт для не-админов.
 func GetUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
@@ -51,7 +56,12 @@ func GetUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Пользователь не найден"})
 		return
 	}
-	c.JSON(http.StatusOK, user)
+	me, hasUser := middleware.GetUserInfo(c)
+	var viewer *middleware.UserInfo
+	if hasUser {
+		viewer = &me
+	}
+	c.JSON(http.StatusOK, userToResponse(user, viewer))
 }
 
 // CreateUser — создание пользователя; только администратор; имя 2–100 символов.

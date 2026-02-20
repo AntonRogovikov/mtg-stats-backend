@@ -44,7 +44,7 @@ func GetUploadDir() string {
 	return getUploadDir()
 }
 
-// imageURLWithCacheBust добавляет ?t=updated_at к URL, чтобы браузер не показывал старую кэшированную картинку.
+// imageURLWithCacheBust добавляет query-параметр t=updated_at для инвалидации кэша браузера.
 func imageURLWithCacheBust(url string, updatedAt time.Time) string {
 	if url == "" {
 		return ""
@@ -248,7 +248,6 @@ func UploadDeckImage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
-	// URL с ?t=... чтобы браузер сразу подгрузил новую картинку, а не кэш
 	imgURL := imageURLWithCacheBust(deck.ImageURL, deck.UpdatedAt)
 	avURL := imageURLWithCacheBust(deck.AvatarURL, deck.UpdatedAt)
 	deckResp := deck
