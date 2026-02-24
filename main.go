@@ -167,6 +167,18 @@ func main() {
 
 	router.POST("/api/auth/login", handlers.Login)
 
+	publicAPI := router.Group("/api")
+	{
+		publicAPI.GET("/decks", handlers.GetDecks)
+		publicAPI.GET("/decks/:id", handlers.GetDeck)
+		publicAPI.GET("/games", handlers.GetGames)
+		publicAPI.GET("/games/:id", handlers.GetGame)
+		publicAPI.GET("/games/active", handlers.GetActiveGame)
+		publicAPI.GET("/stats/players", handlers.GetPlayerStats)
+		publicAPI.GET("/stats/decks", handlers.GetDeckStats)
+		publicAPI.GET("/settings", handlers.GetSettings)
+	}
+
 	api := router.Group("/api")
 	api.Use(middleware.BearerOrJWTAuth(apiToken, jwtSecret))
 	{
@@ -176,8 +188,6 @@ func main() {
 		api.PUT("/users/:id", middleware.RequireUser(), handlers.UpdateUser)
 		api.DELETE("/users/:id", middleware.RequireAdmin(), handlers.DeleteUser)
 
-		api.GET("/decks", handlers.GetDecks)
-		api.GET("/decks/:id", handlers.GetDeck)
 		api.POST("/decks", middleware.RequireAdmin(), handlers.CreateDeck)
 		api.PUT("/decks/:id", middleware.RequireAdmin(), handlers.UpdateDeck)
 		api.POST("/decks/:id/image", middleware.RequireAdmin(), handlers.UploadDeckImage)
@@ -185,19 +195,13 @@ func main() {
 		api.DELETE("/decks/:id", middleware.RequireAdmin(), handlers.DeleteDeck)
 
 		api.POST("/games", middleware.RequireAdmin(), handlers.CreateGame)
-		api.GET("/games", handlers.GetGames)
 		api.DELETE("/games", middleware.RequireAdmin(), handlers.ClearGamesAndTurns)
-		api.GET("/games/active", handlers.GetActiveGame)
 		api.PUT("/games/active", middleware.RequireAdmin(), handlers.UpdateActiveGame)
 		api.POST("/games/active/pause", middleware.RequireAdmin(), handlers.PauseGame)
 		api.POST("/games/active/resume", middleware.RequireAdmin(), handlers.ResumeGame)
 		api.POST("/games/active/start-turn", middleware.RequireAdmin(), handlers.StartTurn)
-		api.GET("/games/:id", handlers.GetGame)
 		api.POST("/games/active/finish", middleware.RequireAdmin(), handlers.FinishGame)
 
-		api.GET("/stats/players", handlers.GetPlayerStats)
-		api.GET("/stats/decks", handlers.GetDeckStats)
-		api.GET("/settings", handlers.GetSettings)
 		api.PUT("/settings", middleware.RequireAdmin(), handlers.UpdateSettings)
 
 		api.GET("/export/all", middleware.RequireAdmin(), handlers.ExportAllData)
