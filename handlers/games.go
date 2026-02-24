@@ -22,6 +22,11 @@ func gameViewer(c *gin.Context) *middleware.UserInfo {
 	return &me
 }
 
+func gameResponse(g models.Game, viewer *middleware.UserInfo) models.GameResponse {
+	_, loc, _ := resolveConfiguredTimezone()
+	return gameToResponse(g, viewer, loc)
+}
+
 // GetGames — список игр с игроками и ходами; is_admin в players маскируется.
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
@@ -34,7 +39,7 @@ func GetGames(c *gin.Context) {
 	viewer := gameViewer(c)
 	resp := make([]models.GameResponse, len(games))
 	for i := range games {
-		resp[i] = gameToResponse(games[i], viewer)
+		resp[i] = gameResponse(games[i], viewer)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -52,7 +57,7 @@ func GetGame(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
 		return
 	}
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // CreateGame — создание активной игры; first_move_team 1 или 2; 409 если активная уже есть.
@@ -121,7 +126,7 @@ func CreateGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
-	c.JSON(http.StatusCreated, gameToResponse(*game, gameViewer(c)))
+	c.JSON(http.StatusCreated, gameResponse(*game, gameViewer(c)))
 }
 
 // PauseGame — поставить партию на паузу; 404 если нет активной.
@@ -134,7 +139,7 @@ func PauseGame(c *gin.Context) {
 	}
 	if game.IsPaused {
 		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-		c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+		c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 		return
 	}
 	now := time.Now().UTC()
@@ -148,7 +153,7 @@ func PauseGame(c *gin.Context) {
 		return
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // ResumeGame — снять паузу; время паузы не идёт в общее и в ход; 404 если нет активной.
@@ -161,7 +166,7 @@ func ResumeGame(c *gin.Context) {
 	}
 	if !game.IsPaused || game.PauseStartedAt == nil {
 		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-		c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+		c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 		return
 	}
 	now := time.Now().UTC()
@@ -184,7 +189,7 @@ func ResumeGame(c *gin.Context) {
 		return
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // StartTurn — установить начало текущего хода (серверное время); 404 если нет активной игры.
@@ -202,7 +207,7 @@ func StartTurn(c *gin.Context) {
 		return
 	}
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // GetActiveGame — текущая активная игра (end_time IS NULL); 404 если нет.
@@ -213,7 +218,7 @@ func GetActiveGame(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // UpdateActiveGame — обновление текущего хода и списка ходов активной игры; 404 если нет активной.
@@ -296,7 +301,7 @@ func UpdateActiveGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // FinishGame — завершение активной игры; winning_team 1 или 2; 404 если нет активной.
@@ -332,7 +337,7 @@ func FinishGame(c *gin.Context) {
 	}
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
-	c.JSON(http.StatusOK, gameToResponse(game, gameViewer(c)))
+	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
 // ClearGamesAndTurns — полная очистка таблиц games, game_players и game_turns.

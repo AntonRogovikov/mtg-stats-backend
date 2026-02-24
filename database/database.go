@@ -1,5 +1,5 @@
 // Package database — инициализация подключения к PostgreSQL через GORM.
-// Настраивает пул (MaxIdleConns=5, MaxOpenConns=20) и выполняет AutoMigrate для User, Deck, Game, GamePlayer, GameTurn.
+// Настраивает пул (MaxIdleConns=5, MaxOpenConns=20) и выполняет AutoMigrate для User, Deck, Game, GamePlayer, GameTurn, AppSetting.
 package database
 
 import (
@@ -45,7 +45,7 @@ func InitDB() error {
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetMaxOpenConns(20)
 
-	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}); err != nil {
+	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}, &models.AppSetting{}); err != nil {
 		return fmt.Errorf("миграции: %w", err)
 	}
 

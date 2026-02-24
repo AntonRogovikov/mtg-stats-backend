@@ -131,9 +131,11 @@ func GetDecks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список колод"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
 	for i := range decks {
 		decks[i].ImageURL = imageURLWithCacheBust(decks[i].ImageURL, decks[i].UpdatedAt)
 		decks[i].AvatarURL = imageURLWithCacheBust(decks[i].AvatarURL, decks[i].UpdatedAt)
+		decks[i] = deckInLocation(decks[i], loc)
 	}
 	c.JSON(http.StatusOK, decks)
 }
@@ -151,8 +153,10 @@ func GetDeck(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
 	deck.ImageURL = imageURLWithCacheBust(deck.ImageURL, deck.UpdatedAt)
 	deck.AvatarURL = imageURLWithCacheBust(deck.AvatarURL, deck.UpdatedAt)
+	deck = deckInLocation(deck, loc)
 	c.JSON(http.StatusOK, deck)
 }
 
@@ -173,6 +177,8 @@ func CreateDeck(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать колоду"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
+	deck = deckInLocation(deck, loc)
 	c.JSON(http.StatusCreated, deck)
 }
 
@@ -203,6 +209,8 @@ func UpdateDeck(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
+	deck = deckInLocation(deck, loc)
 	c.JSON(http.StatusOK, deck)
 }
 
@@ -253,6 +261,8 @@ func UploadDeckImage(c *gin.Context) {
 	deckResp := deck
 	deckResp.ImageURL = imgURL
 	deckResp.AvatarURL = avURL
+	_, loc, _ := resolveConfiguredTimezone()
+	deckResp = deckInLocation(deckResp, loc)
 	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар загружены", "image_url": imgURL, "avatar_url": avURL, "deck": deckResp})
 }
 
@@ -270,6 +280,8 @@ func DeleteDeckImage(c *gin.Context) {
 		return
 	}
 	if deck.ImageURL == "" && deck.AvatarURL == "" {
+		_, loc, _ := resolveConfiguredTimezone()
+		deck = deckInLocation(deck, loc)
 		c.JSON(http.StatusOK, gin.H{"message": "У колоды нет изображения и аватара", "deck": deck})
 		return
 	}
@@ -284,6 +296,8 @@ func DeleteDeckImage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
+	deck = deckInLocation(deck, loc)
 	c.JSON(http.StatusOK, gin.H{"message": "Изображение и аватар удалены", "deck": deck})
 }
 

@@ -153,6 +153,8 @@ func main() {
 				"POST /api/games/active/finish":     "Завершить активную игру",
 				"GET /api/stats/players":            "Статистика игроков",
 				"GET /api/stats/decks":              "Статистика колод",
+				"GET /api/settings":                 "Текущие настройки приложения (timezone)",
+				"PUT /api/settings":                 "Обновить настройки приложения (timezone, только админ)",
 				"GET /api/export/all":               "Экспорт всех данных (пользователи, колоды, игры, изображения в base64) в gzip-архиве JSON",
 				"POST /api/import/all":              "Полная замена всех данных из gzip-архива JSON",
 				"DELETE /api/games":                 "Полная очистка игр и ходов",
@@ -195,6 +197,8 @@ func main() {
 
 		api.GET("/stats/players", handlers.GetPlayerStats)
 		api.GET("/stats/decks", handlers.GetDeckStats)
+		api.GET("/settings", handlers.GetSettings)
+		api.PUT("/settings", middleware.RequireAdmin(), handlers.UpdateSettings)
 
 		api.GET("/export/all", middleware.RequireAdmin(), handlers.ExportAllData)
 		api.POST("/import/all", middleware.RequireAdmin(), handlers.ImportAllData)

@@ -36,9 +36,10 @@ func GetUsers(c *gin.Context) {
 		return
 	}
 	me, _ := middleware.GetUserInfo(c)
+	_, loc, _ := resolveConfiguredTimezone()
 	resp := make([]models.UserResponse, len(users))
 	for i := range users {
-		resp[i] = userToResponse(users[i], &me)
+		resp[i] = userToResponse(users[i], &me, loc)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -61,7 +62,8 @@ func GetUser(c *gin.Context) {
 	if hasUser {
 		viewer = &me
 	}
-	c.JSON(http.StatusOK, userToResponse(user, viewer))
+	_, loc, _ := resolveConfiguredTimezone()
+	c.JSON(http.StatusOK, userToResponse(user, viewer, loc))
 }
 
 // CreateUser — создание пользователя; только администратор; имя 2–100 символов.
@@ -98,6 +100,8 @@ func CreateUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать пользователя"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
+	user = userInLocation(user, loc)
 	c.JSON(http.StatusCreated, user)
 }
 
@@ -158,6 +162,8 @@ func UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить пользователя"})
 		return
 	}
+	_, loc, _ := resolveConfiguredTimezone()
+	user = userInLocation(user, loc)
 	c.JSON(http.StatusOK, user)
 }
 
