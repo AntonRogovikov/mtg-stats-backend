@@ -42,6 +42,7 @@ type GamePlayerResponse struct {
 // GameResponse — игра в ответе API; players[].user.is_admin маскируется для не-админов.
 type GameResponse struct {
 	ID                        uint                  `json:"id"`
+	PublicViewToken           string                `json:"public_view_token,omitempty"`
 	StartTime                 time.Time             `json:"start_time"`
 	EndTime                   *time.Time            `json:"end_time,omitempty"`
 	TurnLimitSeconds          int                   `json:"turn_limit_seconds"`
@@ -65,6 +66,7 @@ type GameResponse struct {
 // Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
 	ID                        uint         `json:"id" gorm:"primaryKey"`
+	ViewToken                 string       `json:"-" gorm:"size:64;uniqueIndex"`
 	StartTime                 time.Time    `json:"start_time"`
 	EndTime                   *time.Time   `json:"end_time,omitempty"`
 	TurnLimitSeconds          int          `json:"turn_limit_seconds"`
@@ -138,6 +140,15 @@ type FinishGameRequest struct {
 	IsTechnicalDefeat bool `json:"is_technical_defeat"`
 }
 
+// RematchRequest — запрос на быстрый реванш.
+// Mode:
+// - classic_rematch
+// - swap_team_decks_random_per_player
+type RematchRequest struct {
+	SourceGameID uint   `json:"source_game_id"`
+	Mode         string `json:"mode"`
+}
+
 // flexTime — время из JSON (RFC3339, RFC3339Nano, ISO8601 от Flutter).
 type flexTime struct{ T *time.Time }
 
@@ -200,4 +211,50 @@ type DeckStats struct {
 	GamesCount int     `json:"games_count"`
 	WinsCount  int     `json:"wins_count"`
 	WinPercent float64 `json:"win_percent"`
+}
+
+// DeckMatchupStats — статистика матчапа пары колод.
+type DeckMatchupStats struct {
+	Deck1ID      int     `json:"deck1_id"`
+	Deck1Name    string  `json:"deck1_name"`
+	Deck2ID      int     `json:"deck2_id"`
+	Deck2Name    string  `json:"deck2_name"`
+	GamesCount   int     `json:"games_count"`
+	Deck1Wins    int     `json:"deck1_wins"`
+	Deck2Wins    int     `json:"deck2_wins"`
+	Deck1WinRate float64 `json:"deck1_win_rate"`
+	Deck2WinRate float64 `json:"deck2_win_rate"`
+}
+
+type DeckMatchupsResponse struct {
+	Matchups []DeckMatchupStats `json:"matchups"`
+}
+
+// MetaDeckStat — агрегат по колоде в мета-срезе.
+type MetaDeckStat struct {
+	DeckID     int     `json:"deck_id"`
+	DeckName   string  `json:"deck_name"`
+	GamesCount int     `json:"games_count"`
+	WinsCount  int     `json:"wins_count"`
+	WinRate    float64 `json:"win_rate"`
+	MetaShare  float64 `json:"meta_share"`
+}
+
+// MetaPeriodStats — статистика по одному временному периоду.
+type MetaPeriodStats struct {
+	Period     string         `json:"period"`
+	TotalGames int            `json:"total_games"`
+	Decks      []MetaDeckStat `json:"decks"`
+}
+
+// MetaDashboardResponse — общий ответ мета-дашборда.
+type MetaDashboardResponse struct {
+	FromDate      string            `json:"from_date,omitempty"`
+	ToDate        string            `json:"to_date,omitempty"`
+	GroupBy       string            `json:"group_by"`
+	TotalGames    int               `json:"total_games"`
+	UniqueDecks   int               `json:"unique_decks"`
+	TopPlayedDecks []MetaDeckStat   `json:"top_played_decks"`
+	TopWinRateDecks []MetaDeckStat  `json:"top_win_rate_decks"`
+	Periods       []MetaPeriodStats `json:"periods"`
 }

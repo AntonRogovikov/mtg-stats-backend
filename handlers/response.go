@@ -33,6 +33,7 @@ func gameToResponse(g models.Game, viewer *middleware.UserInfo, loc *time.Locati
 	}
 	return models.GameResponse{
 		ID:                        g.ID,
+		PublicViewToken:           g.ViewToken,
 		StartTime:                 inLocation(g.StartTime, loc),
 		EndTime:                   inLocationPtr(g.EndTime, loc),
 		TurnLimitSeconds:          g.TurnLimitSeconds,

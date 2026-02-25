@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
+	mathrand "math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +16,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+func generateViewToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func uniqueViewToken(db *gorm.DB) (string, error) {
+	for i := 0; i < 5; i++ {
+		token, err := generateViewToken()
+		if err != nil {
+			return "", err
+		}
+		var count int64
+		if err := db.Model(&models.Game{}).Where("view_token = ?", token).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return token, nil
+		}
+	}
+	return "", gorm.ErrDuplicatedKey
+}
 
 func gameViewer(c *gin.Context) *middleware.UserInfo {
 	me, hasUser := middleware.GetUserInfo(c)
@@ -86,6 +114,7 @@ func CreateGame(c *gin.Context) {
 
 	now := time.Now().UTC()
 	game := &models.Game{
+		ViewToken:            "",
 		StartTime:            now,
 		TurnLimitSeconds:     req.TurnLimitSeconds,
 		TeamTimeLimitSeconds: req.TeamTimeLimitSeconds,
@@ -98,6 +127,12 @@ func CreateGame(c *gin.Context) {
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
+	token, err := uniqueViewToken(db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось сгенерировать публичный токен"})
+		return
+	}
+	game.ViewToken = token
 	for _, p := range req.Players {
 		var userID uint
 		var userName string
@@ -127,6 +162,155 @@ func CreateGame(c *gin.Context) {
 
 	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
 	c.JSON(http.StatusCreated, gameResponse(*game, gameViewer(c)))
+}
+
+// GetGameByPublicToken — read-only просмотр игры без авторизации по публичному токену.
+func GetGameByPublicToken(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Пустой публичный токен"})
+		return
+	}
+	db := database.GetDB()
+	var game models.Game
+	if err := db.Where("view_token = ?", token).Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
+		return
+	}
+	c.JSON(http.StatusOK, gameResponse(game, nil))
+}
+
+func shuffledCopy(src []models.GamePlayer) []models.GamePlayer {
+	out := append([]models.GamePlayer(nil), src...)
+	rng := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	rng.Shuffle(len(out), func(i, j int) {
+		out[i], out[j] = out[j], out[i]
+	})
+	return out
+}
+
+// CreateRematch — создаёт новую игру на основе завершённой.
+func CreateRematch(c *gin.Context) {
+	var req models.RematchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.SourceGameID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_game_id обязателен"})
+		return
+	}
+	mode := req.Mode
+	if mode == "" {
+		mode = "classic_rematch"
+	}
+	if mode != "classic_rematch" && mode != "swap_team_decks_random_per_player" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Неподдерживаемый mode"})
+		return
+	}
+
+	db := database.GetDB()
+
+	var active models.Game
+	if err := db.Where("end_time IS NULL").First(&active).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Активная игра уже существует"})
+		return
+	}
+
+	var source models.Game
+	if err := db.Preload("Players.User").Preload("Turns").First(&source, req.SourceGameID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Исходная игра не найдена"})
+		return
+	}
+	if source.EndTime == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Реванш возможен только для завершённой игры"})
+		return
+	}
+	if len(source.Players) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Недостаточно игроков для реванша"})
+		return
+	}
+
+	now := time.Now().UTC()
+	token, err := uniqueViewToken(db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось сгенерировать публичный токен"})
+		return
+	}
+
+	half := len(source.Players) / 2
+	if half == 0 {
+		half = 1
+	}
+	if half >= len(source.Players) {
+		half = len(source.Players) - 1
+	}
+
+	newPlayers := make([]models.GamePlayer, 0, len(source.Players))
+	switch mode {
+	case "classic_rematch":
+		for _, p := range source.Players {
+			newPlayers = append(newPlayers, models.GamePlayer{
+				UserID:   p.UserID,
+				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
+				DeckID:   p.DeckID,
+				DeckName: p.DeckName,
+			})
+		}
+	case "swap_team_decks_random_per_player":
+		team1Players := source.Players[:half]
+		team2Players := source.Players[half:]
+
+		team1DeckPool := make([]models.GamePlayer, 0, len(team1Players))
+		team2DeckPool := make([]models.GamePlayer, 0, len(team2Players))
+		team1DeckPool = append(team1DeckPool, team1Players...)
+		team2DeckPool = append(team2DeckPool, team2Players...)
+		team1DeckPool = shuffledCopy(team1DeckPool)
+		team2DeckPool = shuffledCopy(team2DeckPool)
+
+		for i, p := range team1Players {
+			deckFrom := team2DeckPool[i%len(team2DeckPool)]
+			newPlayers = append(newPlayers, models.GamePlayer{
+				UserID:   p.UserID,
+				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
+				DeckID:   deckFrom.DeckID,
+				DeckName: deckFrom.DeckName,
+			})
+		}
+		for i, p := range team2Players {
+			deckFrom := team1DeckPool[i%len(team1DeckPool)]
+			newPlayers = append(newPlayers, models.GamePlayer{
+				UserID:   p.UserID,
+				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
+				DeckID:   deckFrom.DeckID,
+				DeckName: deckFrom.DeckName,
+			})
+		}
+	}
+
+	team1 := source.Team1Name
+	team2 := source.Team2Name
+	rematch := models.Game{
+		ViewToken:            token,
+		StartTime:            now,
+		TurnLimitSeconds:     source.TurnLimitSeconds,
+		TeamTimeLimitSeconds: source.TeamTimeLimitSeconds,
+		FirstMoveTeam:        source.FirstMoveTeam,
+		Team1Name:            team1,
+		Team2Name:            team2,
+		CurrentTurnTeam:      source.FirstMoveTeam,
+		Players:              newPlayers,
+		Turns:                []models.GameTurn{},
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+
+	if err := db.Session(&gorm.Session{FullSaveAssociations: true}).Create(&rematch).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать реванш"})
+		return
+	}
+	db.Preload("Players.User").Preload("Turns").First(&rematch, rematch.ID)
+	c.JSON(http.StatusCreated, gameResponse(rematch, gameViewer(c)))
 }
 
 // PauseGame — поставить партию на паузу; 404 если нет активной.

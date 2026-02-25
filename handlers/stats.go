@@ -2,6 +2,10 @@ package handlers
 
 import (
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/models"
@@ -191,4 +195,288 @@ func GetDeckStats(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+func periodKey(t time.Time, groupBy string) string {
+	u := t.UTC()
+	switch groupBy {
+	case "day":
+		return u.Format("2006-01-02")
+	case "month":
+		return u.Format("2006-01")
+	default:
+		year, week := u.ISOWeek()
+		return strings.Join([]string{strconv.Itoa(year), "W", strconv.Itoa(week)}, "")
+	}
+}
+
+// GetDeckMatchups — матрица матчапов колод по завершённым играм.
+func GetDeckMatchups(c *gin.Context) {
+	db := database.GetDB()
+	var games []models.Game
+	if err := db.Where("end_time IS NOT NULL").Preload("Players.User").Find(&games).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
+		return
+	}
+
+	type matchupAgg struct {
+		deck1ID   int
+		deck1Name string
+		deck2ID   int
+		deck2Name string
+		games     int
+		deck1Wins int
+		deck2Wins int
+	}
+	aggByPair := make(map[string]*matchupAgg)
+
+	for _, g := range games {
+		if g.WinningTeam == nil || len(g.Players) < 2 {
+			continue
+		}
+		half := len(g.Players) / 2
+		if half == 0 || half >= len(g.Players) {
+			continue
+		}
+		team1 := g.Players[:half]
+		team2 := g.Players[half:]
+		for _, p1 := range team1 {
+			for _, p2 := range team2 {
+				d1ID, d1Name := p1.DeckID, p1.DeckName
+				d2ID, d2Name := p2.DeckID, p2.DeckName
+				deck1Won := *g.WinningTeam == 1
+				if d1ID > d2ID {
+					d1ID, d2ID = d2ID, d1ID
+					d1Name, d2Name = d2Name, d1Name
+					deck1Won = !deck1Won
+				}
+				key := strings.Join([]string{strconv.Itoa(d1ID), ":", strconv.Itoa(d2ID)}, "")
+				if aggByPair[key] == nil {
+					aggByPair[key] = &matchupAgg{
+						deck1ID:   d1ID,
+						deck1Name: d1Name,
+						deck2ID:   d2ID,
+						deck2Name: d2Name,
+					}
+				}
+				agg := aggByPair[key]
+				agg.games++
+				if deck1Won {
+					agg.deck1Wins++
+				} else {
+					agg.deck2Wins++
+				}
+			}
+		}
+	}
+
+	out := make([]models.DeckMatchupStats, 0, len(aggByPair))
+	for _, a := range aggByPair {
+		deck1Rate := 0.0
+		deck2Rate := 0.0
+		if a.games > 0 {
+			deck1Rate = float64(a.deck1Wins) / float64(a.games) * 100
+			deck2Rate = float64(a.deck2Wins) / float64(a.games) * 100
+		}
+		out = append(out, models.DeckMatchupStats{
+			Deck1ID:      a.deck1ID,
+			Deck1Name:    a.deck1Name,
+			Deck2ID:      a.deck2ID,
+			Deck2Name:    a.deck2Name,
+			GamesCount:   a.games,
+			Deck1Wins:    a.deck1Wins,
+			Deck2Wins:    a.deck2Wins,
+			Deck1WinRate: deck1Rate,
+			Deck2WinRate: deck2Rate,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Deck1Name != out[j].Deck1Name {
+			return out[i].Deck1Name < out[j].Deck1Name
+		}
+		return out[i].Deck2Name < out[j].Deck2Name
+	})
+	c.JSON(http.StatusOK, models.DeckMatchupsResponse{Matchups: out})
+}
+
+// GetMetaDashboard — мета-срез по времени с агрегатами колод.
+func GetMetaDashboard(c *gin.Context) {
+	groupBy := c.DefaultQuery("group_by", "week")
+	if groupBy != "day" && groupBy != "week" && groupBy != "month" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_by должен быть day|week|month"})
+		return
+	}
+
+	var fromDate *time.Time
+	var toDate *time.Time
+	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
+		t, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный from, формат YYYY-MM-DD"})
+			return
+		}
+		u := t.UTC()
+		fromDate = &u
+	}
+	if raw := strings.TrimSpace(c.Query("to")); raw != "" {
+		t, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Некорректный to, формат YYYY-MM-DD"})
+			return
+		}
+		end := t.Add(24*time.Hour - time.Nanosecond).UTC()
+		toDate = &end
+	}
+	if fromDate != nil && toDate != nil && fromDate.After(*toDate) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from должен быть <= to"})
+		return
+	}
+
+	db := database.GetDB()
+	query := db.Where("end_time IS NOT NULL").Preload("Players.User")
+	if fromDate != nil {
+		query = query.Where("start_time >= ?", *fromDate)
+	}
+	if toDate != nil {
+		query = query.Where("start_time <= ?", *toDate)
+	}
+	var games []models.Game
+	if err := query.Find(&games).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить игры для мета-дашборда"})
+		return
+	}
+
+	type deckAgg struct {
+		id    int
+		name  string
+		games int
+		wins  int
+	}
+	type periodAgg struct {
+		totalGames int
+		decks      map[int]*deckAgg
+	}
+
+	allDecks := make(map[int]*deckAgg)
+	periods := make(map[string]*periodAgg)
+	totalGames := 0
+
+	for _, g := range games {
+		if g.WinningTeam == nil {
+			continue
+		}
+		totalGames++
+		pKey := periodKey(g.StartTime, groupBy)
+		if periods[pKey] == nil {
+			periods[pKey] = &periodAgg{decks: make(map[int]*deckAgg)}
+		}
+		pAgg := periods[pKey]
+		pAgg.totalGames++
+
+		for i, p := range g.Players {
+			team := teamForPlayerIndex(i)
+			if allDecks[p.DeckID] == nil {
+				allDecks[p.DeckID] = &deckAgg{id: p.DeckID, name: p.DeckName}
+			}
+			if pAgg.decks[p.DeckID] == nil {
+				pAgg.decks[p.DeckID] = &deckAgg{id: p.DeckID, name: p.DeckName}
+			}
+
+			allDecks[p.DeckID].games++
+			pAgg.decks[p.DeckID].games++
+			if team == *g.WinningTeam {
+				allDecks[p.DeckID].wins++
+				pAgg.decks[p.DeckID].wins++
+			}
+		}
+	}
+
+	toMetaDeck := func(a *deckAgg, total int) models.MetaDeckStat {
+		winRate := 0.0
+		metaShare := 0.0
+		if a.games > 0 {
+			winRate = float64(a.wins) / float64(a.games) * 100
+		}
+		if total > 0 {
+			metaShare = float64(a.games) / float64(total) * 100
+		}
+		return models.MetaDeckStat{
+			DeckID:     a.id,
+			DeckName:   a.name,
+			GamesCount: a.games,
+			WinsCount:  a.wins,
+			WinRate:    winRate,
+			MetaShare:  metaShare,
+		}
+	}
+
+	topPlayed := make([]models.MetaDeckStat, 0, len(allDecks))
+	topWinRate := make([]models.MetaDeckStat, 0, len(allDecks))
+	for _, a := range allDecks {
+		stat := toMetaDeck(a, totalGames)
+		topPlayed = append(topPlayed, stat)
+		if stat.GamesCount >= 3 {
+			topWinRate = append(topWinRate, stat)
+		}
+	}
+	sort.Slice(topPlayed, func(i, j int) bool {
+		if topPlayed[i].GamesCount != topPlayed[j].GamesCount {
+			return topPlayed[i].GamesCount > topPlayed[j].GamesCount
+		}
+		return topPlayed[i].DeckName < topPlayed[j].DeckName
+	})
+	sort.Slice(topWinRate, func(i, j int) bool {
+		if topWinRate[i].WinRate != topWinRate[j].WinRate {
+			return topWinRate[i].WinRate > topWinRate[j].WinRate
+		}
+		return topWinRate[i].DeckName < topWinRate[j].DeckName
+	})
+	if len(topPlayed) > 10 {
+		topPlayed = topPlayed[:10]
+	}
+	if len(topWinRate) > 10 {
+		topWinRate = topWinRate[:10]
+	}
+
+	periodKeys := make([]string, 0, len(periods))
+	for key := range periods {
+		periodKeys = append(periodKeys, key)
+	}
+	sort.Strings(periodKeys)
+
+	periodOut := make([]models.MetaPeriodStats, 0, len(periodKeys))
+	for _, key := range periodKeys {
+		pAgg := periods[key]
+		decks := make([]models.MetaDeckStat, 0, len(pAgg.decks))
+		for _, a := range pAgg.decks {
+			decks = append(decks, toMetaDeck(a, pAgg.totalGames))
+		}
+		sort.Slice(decks, func(i, j int) bool {
+			if decks[i].GamesCount != decks[j].GamesCount {
+				return decks[i].GamesCount > decks[j].GamesCount
+			}
+			return decks[i].DeckName < decks[j].DeckName
+		})
+		periodOut = append(periodOut, models.MetaPeriodStats{
+			Period:     key,
+			TotalGames: pAgg.totalGames,
+			Decks:      decks,
+		})
+	}
+
+	resp := models.MetaDashboardResponse{
+		GroupBy:         groupBy,
+		TotalGames:      totalGames,
+		UniqueDecks:     len(allDecks),
+		TopPlayedDecks:  topPlayed,
+		TopWinRateDecks: topWinRate,
+		Periods:         periodOut,
+	}
+	if fromDate != nil {
+		resp.FromDate = fromDate.Format("2006-01-02")
+	}
+	if toDate != nil {
+		resp.ToDate = toDate.Format("2006-01-02")
+	}
+	c.JSON(http.StatusOK, resp)
 }

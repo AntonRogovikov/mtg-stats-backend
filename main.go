@@ -153,6 +153,10 @@ func main() {
 				"POST /api/games/active/finish":     "Завершить активную игру",
 				"GET /api/stats/players":            "Статистика игроков",
 				"GET /api/stats/decks":              "Статистика колод",
+				"GET /api/stats/deck-matchups":      "Матрица матчапов колод",
+				"GET /api/stats/meta-dashboard":     "Мета-дашборд (группировка day/week/month)",
+				"POST /api/games/rematch":           "Создать быстрый реванш на основе завершённой игры",
+				"GET /api/public/games/:token":      "Публичный read-only просмотр игры по токену",
 				"GET /api/settings":                 "Текущие настройки приложения (timezone)",
 				"PUT /api/settings":                 "Обновить настройки приложения (timezone, только админ)",
 				"GET /api/export/all":               "Экспорт всех данных (пользователи, колоды, игры, изображения в base64) в gzip-архиве JSON",
@@ -176,7 +180,14 @@ func main() {
 		publicAPI.GET("/games/active", handlers.GetActiveGame)
 		publicAPI.GET("/stats/players", handlers.GetPlayerStats)
 		publicAPI.GET("/stats/decks", handlers.GetDeckStats)
+		publicAPI.GET("/stats/deck-matchups", handlers.GetDeckMatchups)
+		publicAPI.GET("/stats/meta-dashboard", handlers.GetMetaDashboard)
 		publicAPI.GET("/settings", handlers.GetSettings)
+	}
+
+	publicReadOnly := router.Group("/api/public")
+	{
+		publicReadOnly.GET("/games/:token", handlers.GetGameByPublicToken)
 	}
 
 	api := router.Group("/api")
@@ -195,6 +206,7 @@ func main() {
 		api.DELETE("/decks/:id", middleware.RequireAdmin(), handlers.DeleteDeck)
 
 		api.POST("/games", middleware.RequireAdmin(), handlers.CreateGame)
+		api.POST("/games/rematch", middleware.RequireAdmin(), handlers.CreateRematch)
 		api.DELETE("/games", middleware.RequireAdmin(), handlers.ClearGamesAndTurns)
 		api.PUT("/games/active", middleware.RequireAdmin(), handlers.UpdateActiveGame)
 		api.POST("/games/active/pause", middleware.RequireAdmin(), handlers.PauseGame)

@@ -66,14 +66,18 @@ mtg-stats-backend/
 ### Игры
 - `GET /api/games`, `GET /api/games/:id`, `GET /api/games/active` — чтение
 - `POST /api/games` — создать (только админ)
+- `POST /api/games/rematch` — быстрый реванш по завершённой игре (только админ)
 - `PUT /api/games/active` — обновить активную (только админ)
 - `POST /api/games/active/pause`, `POST /api/games/active/resume` — пауза (только админ)
 - `POST /api/games/active/start-turn` — начать ход (только админ)
 - `POST /api/games/active/finish` — завершить (только админ)
 - `DELETE /api/games` — полная очистка игр (только админ)
+- `GET /api/public/games/:token` — публичный read-only просмотр игры по токену (без авторизации)
 
 ### Статистика
 - `GET /api/stats/players`, `GET /api/stats/decks` — чтение
+- `GET /api/stats/deck-matchups` — матрица матчапов колод
+- `GET /api/stats/meta-dashboard?group_by=week&from=YYYY-MM-DD&to=YYYY-MM-DD` — мета-дашборд
 
 ### Экспорт/импорт
 - `GET /api/export/all` — экспорт в gzip JSON. По умолчанию без паролей; `?include_passwords=true` — с хешами паролей
