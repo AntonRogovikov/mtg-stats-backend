@@ -36,8 +36,8 @@ type ExportDeck struct {
 
 // ExportPayload — полный дамп данных (пользователи, колоды, игры с игроками и ходами).
 type ExportPayload struct {
-	Users []ExportUser `json:"users"`
-	Decks []ExportDeck `json:"decks"`
+	Users []ExportUser  `json:"users"`
+	Decks []ExportDeck  `json:"decks"`
 	Games []models.Game `json:"games"`
 }
 
@@ -69,9 +69,9 @@ func buildExportPayload(c *gin.Context, includePasswords bool) (*ExportPayload, 
 	exportUsers := make([]ExportUser, 0, len(users))
 	for _, u := range users {
 		eu := ExportUser{
-			ID:      u.ID,
-			Name:    u.Name,
-			IsAdmin: u.IsAdmin,
+			ID:        u.ID,
+			Name:      u.Name,
+			IsAdmin:   u.IsAdmin,
 			CreatedAt: u.CreatedAt,
 			UpdatedAt: u.UpdatedAt,
 		}
@@ -300,6 +300,7 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Данные БД восстановлены, но не удалось восстановить файлы изображений", "details": err.Error()})
 		return
 	}
+	invalidateStatsCache()
 
 	c.JSON(http.StatusOK, gin.H{"message": "Все данные успешно заменены из архива"})
 }

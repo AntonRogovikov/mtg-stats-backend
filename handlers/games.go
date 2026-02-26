@@ -119,13 +119,13 @@ func CreateGame(c *gin.Context) {
 		TurnLimitSeconds:     req.TurnLimitSeconds,
 		TeamTimeLimitSeconds: req.TeamTimeLimitSeconds,
 		FirstMoveTeam:        req.FirstMoveTeam,
-		Team1Name:         req.Team1Name,
-		Team2Name:         req.Team2Name,
-		CurrentTurnTeam:   req.FirstMoveTeam,
-		Players:           make([]models.GamePlayer, 0, len(req.Players)),
-		Turns:             []models.GameTurn{},
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		Team1Name:            req.Team1Name,
+		Team2Name:            req.Team2Name,
+		CurrentTurnTeam:      req.FirstMoveTeam,
+		Players:              make([]models.GamePlayer, 0, len(req.Players)),
+		Turns:                []models.GameTurn{},
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	token, err := uniqueViewToken(db)
 	if err != nil {
@@ -159,6 +159,7 @@ func CreateGame(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать игру"})
 		return
 	}
+	invalidateStatsCache()
 
 	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
 	c.JSON(http.StatusCreated, gameResponse(*game, gameViewer(c)))
@@ -309,6 +310,7 @@ func CreateRematch(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать реванш"})
 		return
 	}
+	invalidateStatsCache()
 	db.Preload("Players.User").Preload("Turns").First(&rematch, rematch.ID)
 	c.JSON(http.StatusCreated, gameResponse(rematch, gameViewer(c)))
 }
@@ -363,10 +365,10 @@ func ResumeGame(c *gin.Context) {
 	game.IsPaused = false
 	game.PauseStartedAt = nil
 	updates := map[string]interface{}{
-		"is_paused":                   false,
-		"pause_started_at":            nil,
+		"is_paused":                    false,
+		"pause_started_at":             nil,
 		"total_pause_duration_seconds": game.TotalPauseDurationSeconds,
-		"current_turn_start":          game.CurrentTurnStart,
+		"current_turn_start":           game.CurrentTurnStart,
 	}
 	if err := db.Model(&game).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
@@ -472,7 +474,7 @@ func UpdateActiveGame(c *gin.Context) {
 			tx.Rollback()
 			log.Printf("UpdateActiveGame: create turns: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Не удалось обновить ходы",
+				"error":  "Не удалось обновить ходы",
 				"detail": err.Error(),
 			})
 			return
@@ -483,6 +485,7 @@ func UpdateActiveGame(c *gin.Context) {
 			return
 		}
 	}
+	invalidateStatsCache()
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
@@ -512,13 +515,14 @@ func FinishGame(c *gin.Context) {
 	game.WinningTeam = &req.WinningTeam
 	game.IsTechnicalDefeat = req.IsTechnicalDefeat
 	if err := db.Model(&game).Updates(map[string]interface{}{
-		"end_time":             game.EndTime,
-		"winning_team":         game.WinningTeam,
-		"is_technical_defeat":  game.IsTechnicalDefeat,
+		"end_time":            game.EndTime,
+		"winning_team":        game.WinningTeam,
+		"is_technical_defeat": game.IsTechnicalDefeat,
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось завершить игру"})
 		return
 	}
+	invalidateStatsCache()
 
 	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
@@ -554,6 +558,7 @@ func ClearGamesAndTurns(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось завершить транзакцию очистки"})
 		return
 	}
+	invalidateStatsCache()
 
 	c.JSON(http.StatusOK, gin.H{"message": "Таблицы игр и ходов успешно очищены"})
 }

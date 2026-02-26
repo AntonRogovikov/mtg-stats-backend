@@ -16,6 +16,7 @@ BEGIN
 END $$;
 
 -- 1. Создаём маппинг старый_id -> новый_id (1, 2, 3... по порядку)
+DROP TABLE IF EXISTS game_id_map;
 CREATE TEMP TABLE game_id_map AS
 SELECT id AS old_id, ROW_NUMBER() OVER (ORDER BY id)::int AS new_id FROM games;
 

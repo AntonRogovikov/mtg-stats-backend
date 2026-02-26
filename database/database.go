@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"mtg-stats-backend/models"
 
@@ -42,8 +44,15 @@ func InitDB() error {
 		return fmt.Errorf("PostgreSQL не отвечает: %w", err)
 	}
 
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetMaxOpenConns(20)
+	maxIdleConns := envInt("DB_MAX_IDLE_CONNS", 5)
+	maxOpenConns := envInt("DB_MAX_OPEN_CONNS", 20)
+	connMaxLifetimeMinutes := envInt("DB_CONN_MAX_LIFETIME_MINUTES", 30)
+	connMaxIdleTimeMinutes := envInt("DB_CONN_MAX_IDLE_TIME_MINUTES", 10)
+
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetimeMinutes) * time.Minute)
+	sqlDB.SetConnMaxIdleTime(time.Duration(connMaxIdleTimeMinutes) * time.Minute)
 
 	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}, &models.AppSetting{}); err != nil {
 		return fmt.Errorf("миграции: %w", err)
@@ -83,4 +92,17 @@ func maskPassword(dsn string) string {
 
 func GetDB() *gorm.DB {
 	return DB
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		log.Printf("Некорректное значение %s=%q, использую %d", key, raw, fallback)
+		return fallback
+	}
+	return v
 }
