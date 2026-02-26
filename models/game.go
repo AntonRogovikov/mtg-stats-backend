@@ -202,6 +202,10 @@ type PlayerStats struct {
 	BestDeckName        string  `json:"best_deck_name"`
 	BestDeckWins        int     `json:"best_deck_wins"`
 	BestDeckGames       int     `json:"best_deck_games"`
+	CurrentWinStreak    *int    `json:"current_win_streak,omitempty"`
+	CurrentLossStreak   *int    `json:"current_loss_streak,omitempty"`
+	MaxWinStreak        *int    `json:"max_win_streak,omitempty"`
+	MaxLossStreak       *int    `json:"max_loss_streak,omitempty"`
 }
 
 // DeckStats — агрегат по колоде (ответ /api/stats/decks).

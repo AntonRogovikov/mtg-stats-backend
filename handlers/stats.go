@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,7 +13,86 @@ import (
 	"mtg-stats-backend/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+type playerStreaks struct {
+	CurrentWinStreak  *int
+	CurrentLossStreak *int
+	MaxWinStreak      *int
+	MaxLossStreak     *int
+}
+
+func computePlayerStreaks(db *gorm.DB) map[uint]playerStreaks {
+	const streakQuery = `
+		WITH ranked_players AS (
+			SELECT
+				gp.user_id,
+				g.end_time,
+				g.winning_team,
+				ROW_NUMBER() OVER (PARTITION BY gp.game_id ORDER BY gp.id) AS player_index,
+				COUNT(*) OVER (PARTITION BY gp.game_id) AS players_count
+			FROM game_players gp
+			JOIN games g ON g.id = gp.game_id
+			WHERE g.end_time IS NOT NULL AND g.winning_team IS NOT NULL
+		)
+		SELECT
+			user_id,
+			end_time,
+			(CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END) = winning_team AS won
+		FROM ranked_players
+		ORDER BY user_id, end_time
+	`
+	var rawRows []struct {
+		UserID  uint      `gorm:"column:user_id"`
+		EndTime time.Time `gorm:"column:end_time"`
+		Won     bool      `gorm:"column:won"`
+	}
+	if err := db.Raw(streakQuery).Scan(&rawRows).Error; err != nil {
+		return nil
+	}
+	byUser := make(map[uint][]bool)
+	for _, row := range rawRows {
+		byUser[row.UserID] = append(byUser[row.UserID], row.Won)
+	}
+	result := make(map[uint]playerStreaks)
+	for userID, outcomes := range byUser {
+		if len(outcomes) == 0 {
+			continue
+		}
+		var curWin, curLoss, maxWin, maxLoss int
+		for _, won := range outcomes {
+			if won {
+				curWin++
+				curLoss = 0
+				if curWin > maxWin {
+					maxWin = curWin
+				}
+			} else {
+				curLoss++
+				curWin = 0
+				if curLoss > maxLoss {
+					maxLoss = curLoss
+				}
+			}
+		}
+		s := playerStreaks{}
+		if maxWin > 0 {
+			s.MaxWinStreak = &maxWin
+		}
+		if maxLoss > 0 {
+			s.MaxLossStreak = &maxLoss
+		}
+		if curWin > 0 {
+			s.CurrentWinStreak = &curWin
+		}
+		if curLoss > 0 {
+			s.CurrentLossStreak = &curLoss
+		}
+		result[userID] = s
+	}
+	return result
+}
 
 // teamForPlayerIndex — индекс игрока 0,1 → команда 1; 2,3 → команда 2.
 func teamForPlayerIndex(i int) int {
@@ -31,6 +111,7 @@ func GetPlayerStats(c *gin.Context) {
 
 	db := database.GetDB()
 	type playerStatsRow struct {
+		UserID             uint   `gorm:"column:user_id"`
 		PlayerName         string `gorm:"column:player_name"`
 		GamesCount         int    `gorm:"column:games_count"`
 		WinsCount          int    `gorm:"column:wins_count"`
@@ -81,8 +162,8 @@ func GetPlayerStats(c *gin.Context) {
 		player_turns AS (
 			SELECT
 				pwt.user_id,
-				COALESCE(AVG(gt.duration_sec)::int, 0) AS avg_turn_duration_sec,
-				COALESCE(MAX(gt.duration_sec), 0) AS max_turn_duration_sec
+				COALESCE(AVG(gt.duration)::int, 0) AS avg_turn_duration_sec,
+				COALESCE(MAX(gt.duration), 0) AS max_turn_duration_sec
 			FROM players_with_team pwt
 			JOIN game_turns gt ON gt.game_id = pwt.game_id
 			WHERE gt.team_number = pwt.player_team
@@ -113,6 +194,7 @@ func GetPlayerStats(c *gin.Context) {
 			ORDER BY user_id, win_ratio DESC, wins_count DESC, games_count DESC, deck_name ASC
 		)
 		SELECT
+			pg.user_id,
 			pg.player_name,
 			pg.games_count,
 			pg.wins_count,
@@ -130,9 +212,12 @@ func GetPlayerStats(c *gin.Context) {
 	`
 	var rows []playerStatsRow
 	if err := db.Raw(query).Scan(&rows).Error; err != nil {
+		log.Printf("GetPlayerStats: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить статистику игроков"})
 		return
 	}
+
+	streaks := computePlayerStreaks(db)
 
 	out := make([]models.PlayerStats, 0, len(rows))
 	for _, r := range rows {
@@ -145,7 +230,7 @@ func GetPlayerStats(c *gin.Context) {
 			firstMovePct = float64(r.FirstMoveWins) / float64(r.FirstMoveGames) * 100
 		}
 
-		out = append(out, models.PlayerStats{
+		stat := models.PlayerStats{
 			PlayerName:          r.PlayerName,
 			GamesCount:          r.GamesCount,
 			WinsCount:           r.WinsCount,
@@ -158,7 +243,14 @@ func GetPlayerStats(c *gin.Context) {
 			BestDeckName:        r.BestDeckName,
 			BestDeckWins:        r.BestDeckWins,
 			BestDeckGames:       r.BestDeckGames,
-		})
+		}
+		if s, ok := streaks[r.UserID]; ok {
+			stat.CurrentWinStreak = s.CurrentWinStreak
+			stat.CurrentLossStreak = s.CurrentLossStreak
+			stat.MaxWinStreak = s.MaxWinStreak
+			stat.MaxLossStreak = s.MaxLossStreak
+		}
+		out = append(out, stat)
 	}
 	writeStatsCacheJSON(c, out)
 }
@@ -205,6 +297,7 @@ func GetDeckStats(c *gin.Context) {
 		GROUP BY deck_id
 	`
 	if err := db.Raw(query).Scan(&rows).Error; err != nil {
+		log.Printf("GetDeckStats: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить статистику колод"})
 		return
 	}
