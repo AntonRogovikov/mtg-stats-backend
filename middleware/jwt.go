@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -63,6 +64,12 @@ func BearerOrJWTAuth(apiToken string, jwtSecret string) gin.HandlerFunc {
 				}
 				return []byte(jwtSecret), nil
 			})
+			if err != nil {
+				if errors.Is(err, jwt.ErrTokenExpired) {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Токен истёк. Войдите снова."})
+					return
+				}
+			}
 			if err == nil && tok != nil && tok.Valid {
 				c.Set(string(UserContextKey), UserInfo{
 					ID:      claims.UserID,

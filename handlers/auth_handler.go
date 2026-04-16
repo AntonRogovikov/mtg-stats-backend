@@ -29,7 +29,7 @@ type LoginResponse struct {
 	User  models.User `json:"user"`
 }
 
-const jwtExpireHours = 24 * 7 // 7 дней
+const jwtExpireHours = 24 * 90 // 3 месяца (90 дней)
 
 // loginRateLimiter — 5 попыток в минуту с одного IP.
 var loginRateLimiter = newLoginRateLimiter(5, time.Minute)
