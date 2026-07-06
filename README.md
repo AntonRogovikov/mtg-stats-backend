@@ -76,8 +76,6 @@ mtg-stats-backend/
 
 ### Статистика
 - `GET /api/stats/players`, `GET /api/stats/decks` — чтение
-- `GET /api/stats/deck-matchups` — матрица матчапов колод
-- `GET /api/stats/meta-dashboard?group_by=week&from=YYYY-MM-DD&to=YYYY-MM-DD` — мета-дашборд
 
 ### Экспорт/импорт
 - `GET /api/export/all` — экспорт в gzip JSON. По умолчанию без паролей; `?include_passwords=true` — с хешами паролей
