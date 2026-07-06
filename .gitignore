@@ -5,6 +5,14 @@
 # Binaries
 app
 *.exe
+mtg_stats_linux
+
+# Разовые скрипты проверки/восстановления и дампы живых данных (не для публичного репо)
+scripts/_live_*.json
+scripts/*report*.txt
+scripts/full_backup_compare.txt
+scripts/final_verify_out.txt
+scripts/restore_games_1_2.sql
 
 # Logs
 *.log

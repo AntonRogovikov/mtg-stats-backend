@@ -1,19 +1,45 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 )
 
 // User — игрок (участник игр, статистика).
 type User struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	Name         string    `json:"name" gorm:"size:100;not null;uniqueIndex"`
-	PasswordHash string    `json:"-" gorm:"size:255"` // хеш пароля, не возвращается в API
-	IsAdmin      bool      `json:"is_admin" gorm:"default:false"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                 uint      `json:"id" gorm:"primaryKey"`
+	Name               string    `json:"name" gorm:"size:100;not null;uniqueIndex"`
+	PasswordHash       string    `json:"-" gorm:"size:255"` // хеш пароля, не возвращается в API
+	IsAdmin            bool      `json:"is_admin" gorm:"default:false"`
+	AllowAdminDowngrade bool     `json:"-" gorm:"-"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// BeforeSave защищает чувствительные поля от случайного обнуления при косвенных Save/association-save.
+func (u *User) BeforeSave(tx *gorm.DB) error {
+	if u.ID == 0 {
+		return nil
+	}
+	var current User
+	if err := tx.Session(&gorm.Session{NewDB: true}).
+		Select("id", "password_hash", "is_admin").
+		First(&current, u.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if current.PasswordHash != "" && u.PasswordHash == "" {
+		u.PasswordHash = current.PasswordHash
+	}
+	if current.IsAdmin && !u.IsAdmin && !u.AllowAdminDowngrade {
+		u.IsAdmin = true
+	}
+	return nil
 }
 
 // UserRequest — создание/обновление пользователя (имя 2–100 символов).

@@ -255,8 +255,8 @@ func GetPlayerStats(c *gin.Context) {
 	writeStatsCacheJSON(c, out)
 }
 
-// GetDeckStats — агрегат по колодам по завершённым играм (игры, победы, %).
-// Загружает все завершённые игры в память; при большом объёме данных рассмотреть SQL-агрегацию.
+// GetDeckStats — агрегат по колодам по завершённым играм (партии, победы, %).
+// games_count — число уникальных партий с колодой (COUNT DISTINCT game_id).
 func GetDeckStats(c *gin.Context) {
 	if writeStatsCacheHit(c) {
 		return
@@ -273,6 +273,7 @@ func GetDeckStats(c *gin.Context) {
 	query := `
 		WITH ranked_players AS (
 			SELECT
+				gp.game_id,
 				gp.deck_id,
 				gp.deck_name,
 				g.winning_team,
@@ -282,19 +283,30 @@ func GetDeckStats(c *gin.Context) {
 			JOIN games g ON g.id = gp.game_id
 			WHERE g.end_time IS NOT NULL
 				AND g.winning_team IS NOT NULL
+		),
+		players_with_team AS (
+			SELECT
+				*,
+				CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END AS player_team
+			FROM ranked_players
+		),
+		deck_per_game AS (
+			SELECT
+				deck_id,
+				MAX(deck_name) AS deck_name,
+				game_id,
+				MAX(CASE WHEN player_team = winning_team THEN 1 ELSE 0 END) AS won
+			FROM players_with_team
+			GROUP BY deck_id, game_id
 		)
 		SELECT
 			deck_id,
 			MAX(deck_name) AS deck_name,
 			COUNT(*) AS games_count,
-			SUM(
-				CASE
-					WHEN (CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END) = winning_team
-					THEN 1 ELSE 0
-				END
-			) AS wins_count
-		FROM ranked_players
+			SUM(won) AS wins_count
+		FROM deck_per_game
 		GROUP BY deck_id
+		ORDER BY deck_name ASC
 	`
 	if err := db.Raw(query).Scan(&rows).Error; err != nil {
 		log.Printf("GetDeckStats: %v", err)
@@ -523,6 +535,7 @@ func GetMetaDashboard(c *gin.Context) {
 		WITH ranked_players AS (
 			SELECT
 				%s AS period,
+				gp.game_id,
 				gp.deck_id,
 				gp.deck_name,
 				g.winning_team,
@@ -531,19 +544,30 @@ func GetMetaDashboard(c *gin.Context) {
 			FROM game_players gp
 			JOIN games g ON g.id = gp.game_id
 			WHERE %s
+		),
+		players_with_team AS (
+			SELECT
+				*,
+				CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END AS player_team
+			FROM ranked_players
+		),
+		deck_per_game AS (
+			SELECT
+				period,
+				deck_id,
+				MAX(deck_name) AS deck_name,
+				game_id,
+				MAX(CASE WHEN player_team = winning_team THEN 1 ELSE 0 END) AS won
+			FROM players_with_team
+			GROUP BY period, deck_id, game_id
 		)
 		SELECT
 			period,
 			deck_id,
 			MAX(deck_name) AS deck_name,
 			COUNT(*) AS games_count,
-			SUM(
-				CASE
-					WHEN (CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END) = winning_team
-					THEN 1 ELSE 0
-				END
-			) AS wins_count
-		FROM ranked_players
+			SUM(won) AS wins_count
+		FROM deck_per_game
 		GROUP BY period, deck_id
 	`, periodExpr, whereClause)
 	var periodDeckRows []periodDeckRow

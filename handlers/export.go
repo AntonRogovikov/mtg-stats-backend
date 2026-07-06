@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mtg-stats-backend/database"
 	"mtg-stats-backend/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ExportUser — пользователь для экспорта; password_hash только при ?include_passwords=true.
@@ -34,11 +36,22 @@ type ExportDeck struct {
 	AvatarBase64 string `json:"avatar_base64,omitempty"`
 }
 
+// ExportGame — игра для экспорта с публичным view_token (в models.Game поле скрыто json:"-").
+type ExportGame struct {
+	models.Game
+	ViewToken string `json:"view_token,omitempty"`
+}
+
 // ExportPayload — полный дамп данных (пользователи, колоды, игры с игроками и ходами).
 type ExportPayload struct {
 	Users []ExportUser  `json:"users"`
 	Decks []ExportDeck  `json:"decks"`
-	Games []models.Game `json:"games"`
+	Games []ExportGame  `json:"games"`
+}
+
+type preservedUserAuth struct {
+	PasswordHash string
+	IsAdmin      bool
 }
 
 func fileBase64FromImageURL(imageURL string) (string, error) {
@@ -88,7 +101,7 @@ func buildExportPayload(c *gin.Context, includePasswords bool) (*ExportPayload, 
 	}
 
 	var games []models.Game
-	if err := db.Order("updated_at DESC").Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
+	if err := db.Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").Find(&games).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return nil, false
 	}
@@ -112,10 +125,18 @@ func buildExportPayload(c *gin.Context, includePasswords bool) (*ExportPayload, 
 		})
 	}
 
+	exportGames := make([]ExportGame, 0, len(games))
+	for _, g := range games {
+		exportGames = append(exportGames, ExportGame{
+			Game:      g,
+			ViewToken: g.ViewToken,
+		})
+	}
+
 	payload := &ExportPayload{
 		Users: exportUsers,
 		Decks: exportDecks,
-		Games: games,
+		Games: exportGames,
 	}
 	return payload, true
 }
@@ -188,6 +209,22 @@ func restoreDeckImagesFromExport(decks []ExportDeck) error {
 // затем записывает изображения колод на диск из base64.
 func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 	db := database.GetDB()
+
+	// Сохраняем auth-поля текущих пользователей, чтобы импорт не мог их "самопроизвольно"
+	// сбросить (например, если архив был экспортирован без include_passwords=true).
+	preservedByName := make(map[string]preservedUserAuth)
+	var existingUsers []models.User
+	if err := db.Select("name", "password_hash", "is_admin").Find(&existingUsers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось прочитать текущих пользователей перед импортом"})
+		return
+	}
+	for _, u := range existingUsers {
+		preservedByName[u.Name] = preservedUserAuth{
+			PasswordHash: u.PasswordHash,
+			IsAdmin:      u.IsAdmin,
+		}
+	}
+
 	tx := db.Begin()
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось начать транзакцию импорта"})
@@ -205,11 +242,17 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 	if len(payload.Users) > 0 {
 		users := make([]models.User, 0, len(payload.Users))
 		for _, eu := range payload.Users {
+			passwordHash := eu.PasswordHash
+			isAdmin := eu.IsAdmin
+			if preserved, ok := preservedByName[eu.Name]; ok {
+				passwordHash = preserved.PasswordHash
+				isAdmin = preserved.IsAdmin
+			}
 			users = append(users, models.User{
 				ID:           eu.ID,
 				Name:         eu.Name,
-				PasswordHash: eu.PasswordHash,
-				IsAdmin:      eu.IsAdmin,
+				PasswordHash: passwordHash,
+				IsAdmin:      isAdmin,
 				CreatedAt:    eu.CreatedAt,
 				UpdatedAt:    eu.UpdatedAt,
 			})
@@ -235,7 +278,19 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 	}
 
 	// Восстанавливаем игры, игроков и ходы.
-	for _, g := range payload.Games {
+	for _, eg := range payload.Games {
+		g := eg.Game
+		viewToken := strings.TrimSpace(eg.ViewToken)
+		if viewToken == "" {
+			var err error
+			viewToken, err = uniqueViewToken(tx)
+			if err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось сгенерировать публичный токен игры"})
+				return
+			}
+		}
+		g.ViewToken = viewToken
 		players := g.Players
 		turns := g.Turns
 		g.Players = nil

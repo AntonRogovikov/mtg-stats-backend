@@ -59,7 +59,7 @@ func gameResponse(g models.Game, viewer *middleware.UserInfo) models.GameRespons
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
-	result := db.Order("updated_at DESC").Preload("Players.User").Preload("Turns").Find(&games)
+	result := db.Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").Find(&games)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
@@ -81,7 +81,7 @@ func GetGame(c *gin.Context) {
 	}
 	db := database.GetDB()
 	var game models.Game
-	if err := db.Preload("Players.User").Preload("Turns").First(&game, id).Error; err != nil {
+	if err := db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
 		return
 	}
@@ -99,8 +99,8 @@ func CreateGame(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "first_move_team должен быть 1 или 2"})
 		return
 	}
-	if len(req.Players) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Укажите хотя бы одного игрока"})
+	if len(req.Players) != 4 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Должно быть ровно 4 игрока"})
 		return
 	}
 
@@ -135,13 +135,10 @@ func CreateGame(c *gin.Context) {
 	game.ViewToken = token
 	for _, p := range req.Players {
 		var userID uint
-		var userName string
 		if p.User != nil && p.User.ID != 0 {
 			userID = p.User.ID
-			userName = p.User.Name
 		} else {
 			userID = uint(p.UserID)
-			userName = p.UserName
 		}
 		if userID == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "У каждого игрока должен быть user_id или user.id"})
@@ -149,19 +146,19 @@ func CreateGame(c *gin.Context) {
 		}
 		game.Players = append(game.Players, models.GamePlayer{
 			UserID:   userID,
-			User:     models.User{ID: userID, Name: userName},
 			DeckID:   p.DeckID,
 			DeckName: p.DeckName,
 		})
 	}
 
-	if err := db.Session(&gorm.Session{FullSaveAssociations: true}).Create(game).Error; err != nil {
+	// Не сохраняем вложенный User: частичная структура с FullSaveAssociations затирала password_hash и is_admin.
+	if err := db.Omit("Players.User").Create(game).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать игру"})
 		return
 	}
 	invalidateStatsCache()
 
-	db.Preload("Players.User").Preload("Turns").First(game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(game, game.ID)
 	c.JSON(http.StatusCreated, gameResponse(*game, gameViewer(c)))
 }
 
@@ -174,7 +171,7 @@ func GetGameByPublicToken(c *gin.Context) {
 	}
 	db := database.GetDB()
 	var game models.Game
-	if err := db.Where("view_token = ?", token).Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
+	if err := db.Where("view_token = ?", token).Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Игра не найдена"})
 		return
 	}
@@ -219,7 +216,7 @@ func CreateRematch(c *gin.Context) {
 	}
 
 	var source models.Game
-	if err := db.Preload("Players.User").Preload("Turns").First(&source, req.SourceGameID).Error; err != nil {
+	if err := db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&source, req.SourceGameID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Исходная игра не найдена"})
 		return
 	}
@@ -253,7 +250,6 @@ func CreateRematch(c *gin.Context) {
 		for _, p := range source.Players {
 			newPlayers = append(newPlayers, models.GamePlayer{
 				UserID:   p.UserID,
-				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
 				DeckID:   p.DeckID,
 				DeckName: p.DeckName,
 			})
@@ -273,7 +269,6 @@ func CreateRematch(c *gin.Context) {
 			deckFrom := team2DeckPool[i%len(team2DeckPool)]
 			newPlayers = append(newPlayers, models.GamePlayer{
 				UserID:   p.UserID,
-				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
 				DeckID:   deckFrom.DeckID,
 				DeckName: deckFrom.DeckName,
 			})
@@ -282,7 +277,6 @@ func CreateRematch(c *gin.Context) {
 			deckFrom := team1DeckPool[i%len(team1DeckPool)]
 			newPlayers = append(newPlayers, models.GamePlayer{
 				UserID:   p.UserID,
-				User:     models.User{ID: p.User.ID, Name: p.User.Name, IsAdmin: p.User.IsAdmin},
 				DeckID:   deckFrom.DeckID,
 				DeckName: deckFrom.DeckName,
 			})
@@ -306,12 +300,12 @@ func CreateRematch(c *gin.Context) {
 		UpdatedAt:            now,
 	}
 
-	if err := db.Session(&gorm.Session{FullSaveAssociations: true}).Create(&rematch).Error; err != nil {
+	if err := db.Omit("Players.User").Create(&rematch).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать реванш"})
 		return
 	}
 	invalidateStatsCache()
-	db.Preload("Players.User").Preload("Turns").First(&rematch, rematch.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&rematch, rematch.ID)
 	c.JSON(http.StatusCreated, gameResponse(rematch, gameViewer(c)))
 }
 
@@ -324,7 +318,7 @@ func PauseGame(c *gin.Context) {
 		return
 	}
 	if game.IsPaused {
-		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+		db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 		c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 		return
 	}
@@ -338,7 +332,7 @@ func PauseGame(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось поставить на паузу"})
 		return
 	}
-	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
@@ -351,7 +345,7 @@ func ResumeGame(c *gin.Context) {
 		return
 	}
 	if !game.IsPaused || game.PauseStartedAt == nil {
-		db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+		db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 		c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 		return
 	}
@@ -374,7 +368,7 @@ func ResumeGame(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось снять паузу"})
 		return
 	}
-	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
@@ -392,7 +386,7 @@ func StartTurn(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить игру"})
 		return
 	}
-	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
@@ -400,7 +394,7 @@ func StartTurn(c *gin.Context) {
 func GetActiveGame(c *gin.Context) {
 	db := database.GetDB()
 	var game models.Game
-	if err := db.Where("end_time IS NULL").Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
+	if err := db.Where("end_time IS NULL").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Нет активной игры"})
 		return
 	}
@@ -487,7 +481,7 @@ func UpdateActiveGame(c *gin.Context) {
 	}
 	invalidateStatsCache()
 
-	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 
@@ -524,7 +518,7 @@ func FinishGame(c *gin.Context) {
 	}
 	invalidateStatsCache()
 
-	db.Preload("Players.User").Preload("Turns").First(&game, game.ID)
+	db.Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").First(&game, game.ID)
 	c.JSON(http.StatusOK, gameResponse(game, gameViewer(c)))
 }
 

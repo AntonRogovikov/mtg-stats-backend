@@ -88,6 +88,8 @@ func CreateUser(c *gin.Context) {
 		user.PasswordHash = hash
 	}
 	if req.IsAdmin != nil {
+		// Явное изменение роли админом — разрешаем осознанный downgrade/promote.
+		user.AllowAdminDowngrade = true
 		user.IsAdmin = *req.IsAdmin
 	}
 	db := database.GetDB()
@@ -156,6 +158,9 @@ func UpdateUser(c *gin.Context) {
 		user.PasswordHash = hash
 	}
 	if req.IsAdmin != nil {
+		if isAdmin {
+			user.AllowAdminDowngrade = true
+		}
 		user.IsAdmin = *req.IsAdmin
 	}
 	if err := db.Save(&user).Error; err != nil {
@@ -175,6 +180,15 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 	db := database.GetDB()
+	var gamesCount int64
+	if err := db.Model(&models.GamePlayer{}).Where("user_id = ?", id).Count(&gamesCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось проверить участие пользователя в играх"})
+		return
+	}
+	if gamesCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "Нельзя удалить пользователя: есть записи в играх"})
+		return
+	}
 	result := db.Delete(&models.User{}, id)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось удалить пользователя"})
@@ -184,5 +198,6 @@ func DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Пользователь не найден"})
 		return
 	}
+	invalidateStatsCache()
 	c.JSON(http.StatusOK, gin.H{"message": "Пользователь удалён", "id": id})
 }
