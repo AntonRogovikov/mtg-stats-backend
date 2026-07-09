@@ -63,7 +63,28 @@ func InitDB() error {
 		return fmt.Errorf("сид глобального разреза: %w", err)
 	}
 
+	if err := syncSequences(DB); err != nil {
+		return fmt.Errorf("синхронизация последовательностей: %w", err)
+	}
+
 	log.Println("БД подключена, таблицы проверены")
+	return nil
+}
+
+// syncSequences выравнивает счётчики автонумерации по максимальному id в таблицах.
+// Вставки с явным id (импорт бэкапа, восстановление дампа) счётчик не двигают,
+// из-за чего следующий INSERT падает с duplicate key. Операция идемпотентна.
+func syncSequences(db *gorm.DB) error {
+	tables := []string{"users", "decks", "games", "game_players", "game_turns", "slices"}
+	for _, table := range tables {
+		query := fmt.Sprintf(
+			"SELECT setval(pg_get_serial_sequence('%s','id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM %s), 1))",
+			table, table,
+		)
+		if err := db.Exec(query).Error; err != nil {
+			return fmt.Errorf("таблица %s: %w", table, err)
+		}
+	}
 	return nil
 }
 
@@ -80,10 +101,7 @@ func ensureDefaultSlice(db *gorm.DB) error {
 		if err := db.Create(&slice).Error; err != nil {
 			return err
 		}
-		// Вставка с явным id не двигает sequence — синхронизируем, чтобы следующий разрез получил id=2.
-		if err := db.Exec("SELECT setval(pg_get_serial_sequence('slices','id'), GREATEST((SELECT MAX(id) FROM slices), 1))").Error; err != nil {
-			return err
-		}
+		// Счётчик slices выровняет syncSequences сразу после сида.
 		log.Println("Создан глобальный разрез (id=1)")
 	} else if !slice.IsDefault {
 		if err := db.Model(&slice).Update("is_default", true).Error; err != nil {
