@@ -22,6 +22,7 @@ mtg-stats-backend/
 │   ├── user_handler.go    # CRUD пользователей
 │   ├── deck_handler.go    # CRUD колод, загрузка/удаление изображений
 │   ├── games.go           # CRUD игр, активная игра, ходы, пауза/возобновление
+│   ├── slices.go          # CRUD разрезов статистики
 │   ├── stats.go           # Статистика игроков и колод
 │   └── export.go          # Экспорт/импорт всех данных (gzip JSON)
 │
@@ -32,6 +33,7 @@ mtg-stats-backend/
 ├── models/                # Доменные модели и DTO
 │   ├── user.go            # User, UserRequest, UserClaims (JWT)
 │   ├── deck.go            # Deck, DeckRequest
+│   ├── slice.go           # Slice, SliceDeck, SlicePlayer (разрезы статистики)
 │   └── game.go            # Game, GamePlayer, GameTurn, запросы/ответы
 │
 └── scripts/
@@ -74,8 +76,18 @@ mtg-stats-backend/
 - `DELETE /api/games` — полная очистка игр (только админ)
 - `GET /api/public/games/:token` — публичный read-only просмотр игры по токену (без авторизации)
 
+### Разрезы статистики
+Разрез — изолированный контекст: свой пул колод, свои игры и статистика. Игра привязывается к разрезу при создании (`games.slice_id`) навсегда. Разрез `id=1` («Глобальный») создаётся автоматически при старте, его пул не ограничен, удалить нельзя.
+
+- `GET /api/slices` — список разрезов (глобальный первым)
+- `GET /api/slices/:id` — разрез с пулом колод и игроками
+- `POST /api/slices` — создать (только админ); минимум 4 колоды в пуле, цвет `#RRGGBB` (опционально)
+- `PUT /api/slices/:id` — обновить (только админ). Если в разрезе есть игры, пул колод заморожен: меняются только имя и цвет
+- `DELETE /api/slices/:id` — удалить разрез **вместе со всеми его играми** (только админ)
+
 ### Статистика
-- `GET /api/stats/players`, `GET /api/stats/decks` — чтение
+- `GET /api/stats/players?slice_id=N`, `GET /api/stats/decks?slice_id=N` — чтение; без `slice_id` — глобальный разрез.
+  Имя колоды берётся из справочника по `deck_id` (переименования подхватываются); снимок `game_players.deck_name` — фолбэк для удалённых колод.
 
 ### Экспорт/импорт
 - `GET /api/export/all` — экспорт в gzip JSON. По умолчанию без паролей; `?include_passwords=true` — с хешами паролей

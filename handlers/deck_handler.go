@@ -209,6 +209,8 @@ func UpdateDeck(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить колоду"})
 		return
 	}
+	// Статистика показывает актуальное имя колоды из справочника — сбрасываем кэш после переименования.
+	invalidateStatsCache()
 	_, loc, _ := resolveConfiguredTimezone()
 	deck = deckInLocation(deck, loc)
 	c.JSON(http.StatusOK, deck)
@@ -328,5 +330,9 @@ func DeleteDeck(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Колода не найдена"})
 		return
 	}
+	// Убираем колоду из пулов разрезов, чтобы не оставались фантомные ссылки.
+	db.Where("deck_id = ?", id).Delete(&models.SliceDeck{})
+	// После удаления имя колоды в статистике берётся из снимка игры — сбрасываем кэш.
+	invalidateStatsCache()
 	c.JSON(http.StatusOK, gin.H{"message": "Колода удалена", "id": id})
 }

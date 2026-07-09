@@ -42,6 +42,7 @@ type GamePlayerResponse struct {
 // GameResponse — игра в ответе API; players[].user.is_admin маскируется для не-админов.
 type GameResponse struct {
 	ID                        uint                  `json:"id"`
+	SliceID                   uint                  `json:"slice_id"`
 	PublicViewToken           string                `json:"public_view_token,omitempty"`
 	StartTime                 time.Time             `json:"start_time"`
 	EndTime                   *time.Time            `json:"end_time,omitempty"`
@@ -66,6 +67,7 @@ type GameResponse struct {
 // Game — партия (игроки, ходы, лимит времени); end_time == nil — активная игра; winning_team 1 или 2.
 type Game struct {
 	ID                        uint         `json:"id" gorm:"primaryKey"`
+	SliceID                   uint         `json:"slice_id" gorm:"not null;default:1;index"`
 	ViewToken                 string       `json:"-" gorm:"size:64;uniqueIndex"`
 	StartTime                 time.Time    `json:"start_time"`
 	EndTime                   *time.Time   `json:"end_time,omitempty"`
@@ -126,6 +128,7 @@ type CreateGamePlayerInput struct {
 
 // CreateGameRequest — запрос создания игры.
 type CreateGameRequest struct {
+	SliceID               flexUint                `json:"slice_id"` // 0 → глобальный разрез (id=1)
 	TurnLimitSeconds      int                     `json:"turn_limit_seconds"`
 	TeamTimeLimitSeconds  int                     `json:"team_time_limit_seconds"`
 	FirstMoveTeam         int                     `json:"first_move_team"`

@@ -55,11 +55,11 @@ func gameResponse(g models.Game, viewer *middleware.UserInfo) models.GameRespons
 	return gameToResponse(g, viewer, loc)
 }
 
-// GetGames — список игр с игроками и ходами; is_admin в players маскируется.
+// GetGames — список игр разреза (?slice_id=N, по умолчанию глобальный) с игроками и ходами.
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
-	result := db.Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").Find(&games)
+	result := db.Where("slice_id = ?", sliceIDFromQuery(c)).Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").Find(&games)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
@@ -112,8 +112,37 @@ func CreateGame(c *gin.Context) {
 		return
 	}
 
+	sliceID := uint(req.SliceID)
+	if sliceID == 0 {
+		sliceID = DefaultSliceID
+	}
+	var slice models.Slice
+	if err := db.First(&slice, sliceID).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Разрез не найден"})
+		return
+	}
+	// В обычном разрезе колоды игроков должны входить в пул; глобальный не ограничен.
+	if !slice.IsDefault {
+		var poolRows []models.SliceDeck
+		if err := db.Where("slice_id = ?", slice.ID).Find(&poolRows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить пул колод разреза"})
+			return
+		}
+		pool := make(map[int]bool, len(poolRows))
+		for _, r := range poolRows {
+			pool[int(r.DeckID)] = true
+		}
+		for _, p := range req.Players {
+			if !pool[p.DeckID] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Колода «" + p.DeckName + "» не входит в пул разреза «" + slice.Name + "»"})
+				return
+			}
+		}
+	}
+
 	now := time.Now().UTC()
 	game := &models.Game{
+		SliceID:              sliceID,
 		ViewToken:            "",
 		StartTime:            now,
 		TurnLimitSeconds:     req.TurnLimitSeconds,
@@ -286,6 +315,7 @@ func CreateRematch(c *gin.Context) {
 	team1 := source.Team1Name
 	team2 := source.Team2Name
 	rematch := models.Game{
+		SliceID:              source.SliceID, // реванш наследует разрез исходной игры
 		ViewToken:            token,
 		StartTime:            now,
 		TurnLimitSeconds:     source.TurnLimitSeconds,

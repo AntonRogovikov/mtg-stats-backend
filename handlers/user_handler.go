@@ -198,6 +198,8 @@ func DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Пользователь не найден"})
 		return
 	}
+	// Убираем пользователя из составов разрезов.
+	db.Where("user_id = ?", id).Delete(&models.SlicePlayer{})
 	invalidateStatsCache()
 	c.JSON(http.StatusOK, gin.H{"message": "Пользователь удалён", "id": id})
 }

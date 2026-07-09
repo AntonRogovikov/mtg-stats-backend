@@ -3,6 +3,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -54,12 +55,42 @@ func InitDB() error {
 	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetimeMinutes) * time.Minute)
 	sqlDB.SetConnMaxIdleTime(time.Duration(connMaxIdleTimeMinutes) * time.Minute)
 
-	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}, &models.AppSetting{}); err != nil {
+	if err := DB.AutoMigrate(&models.User{}, &models.Deck{}, &models.Game{}, &models.GamePlayer{}, &models.GameTurn{}, &models.AppSetting{}, &models.Slice{}, &models.SliceDeck{}, &models.SlicePlayer{}); err != nil {
 		return fmt.Errorf("миграции: %w", err)
+	}
+
+	if err := ensureDefaultSlice(DB); err != nil {
+		return fmt.Errorf("сид глобального разреза: %w", err)
 	}
 
 	log.Println("БД подключена, таблицы проверены")
 	return nil
+}
+
+// ensureDefaultSlice гарантирует существование глобального разреза (id=1)
+// и привязывает к нему игры без разреза (например, созданные до миграции).
+func ensureDefaultSlice(db *gorm.DB) error {
+	var slice models.Slice
+	err := db.First(&slice, 1).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		slice = models.Slice{ID: 1, Name: "Глобальный", IsDefault: true}
+		if err := db.Create(&slice).Error; err != nil {
+			return err
+		}
+		// Вставка с явным id не двигает sequence — синхронизируем, чтобы следующий разрез получил id=2.
+		if err := db.Exec("SELECT setval(pg_get_serial_sequence('slices','id'), GREATEST((SELECT MAX(id) FROM slices), 1))").Error; err != nil {
+			return err
+		}
+		log.Println("Создан глобальный разрез (id=1)")
+	} else if !slice.IsDefault {
+		if err := db.Model(&slice).Update("is_default", true).Error; err != nil {
+			return err
+		}
+	}
+	return db.Exec("UPDATE games SET slice_id = 1 WHERE slice_id IS NULL OR slice_id = 0").Error
 }
 
 // maskPassword скрывает пароль в DSN для логов (URL и key=value форматы).

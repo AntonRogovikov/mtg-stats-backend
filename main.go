@@ -151,8 +151,13 @@ func main() {
 				"POST /api/games":                   "Создать игру",
 				"PUT /api/games/active":             "Обновить активную игру",
 				"POST /api/games/active/finish":     "Завершить активную игру",
-				"GET /api/stats/players":            "Статистика игроков",
-				"GET /api/stats/decks":              "Статистика колод",
+				"GET /api/stats/players":            "Статистика игроков (?slice_id=N)",
+				"GET /api/stats/decks":              "Статистика колод (?slice_id=N)",
+				"GET /api/slices":                   "Список разрезов статистики",
+				"GET /api/slices/:id":               "Разрез по ID (пул колод, игроки)",
+				"POST /api/slices":                  "Создать разрез (только админ)",
+				"PUT /api/slices/:id":               "Обновить разрез (только админ)",
+				"DELETE /api/slices/:id":            "Удалить разрез без игр (только админ)",
 				"POST /api/games/rematch":           "Создать быстрый реванш на основе завершённой игры",
 				"GET /api/public/games/:token":      "Публичный read-only просмотр игры по токену",
 				"GET /api/settings":                 "Текущие настройки приложения (timezone)",
@@ -178,6 +183,8 @@ func main() {
 		publicAPI.GET("/games/:id", handlers.GetGame)
 		publicAPI.GET("/stats/players", handlers.GetPlayerStats)
 		publicAPI.GET("/stats/decks", handlers.GetDeckStats)
+		publicAPI.GET("/slices", handlers.GetSlices)
+		publicAPI.GET("/slices/:id", handlers.GetSlice)
 		publicAPI.GET("/settings", handlers.GetSettings)
 	}
 
@@ -209,6 +216,10 @@ func main() {
 		api.POST("/games/active/resume", middleware.RequireAdmin(), handlers.ResumeGame)
 		api.POST("/games/active/start-turn", middleware.RequireAdmin(), handlers.StartTurn)
 		api.POST("/games/active/finish", middleware.RequireAdmin(), handlers.FinishGame)
+
+		api.POST("/slices", middleware.RequireAdmin(), handlers.CreateSlice)
+		api.PUT("/slices/:id", middleware.RequireAdmin(), handlers.UpdateSlice)
+		api.DELETE("/slices/:id", middleware.RequireAdmin(), handlers.DeleteSlice)
 
 		api.PUT("/settings", middleware.RequireAdmin(), handlers.UpdateSettings)
 

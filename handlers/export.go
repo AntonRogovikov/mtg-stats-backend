@@ -42,11 +42,20 @@ type ExportGame struct {
 	ViewToken string `json:"view_token,omitempty"`
 }
 
-// ExportPayload — полный дамп данных (пользователи, колоды, игры с игроками и ходами).
+// ExportSlice — разрез с пулом колод и игроками.
+type ExportSlice struct {
+	models.Slice
+	DeckIDs   []uint `json:"deck_ids"`
+	PlayerIDs []uint `json:"player_ids"`
+}
+
+// ExportPayload — полный дамп данных (пользователи, колоды, разрезы, игры с игроками и ходами).
+// Slices отсутствует в старых архивах — тогда при импорте все игры уходят в глобальный разрез.
 type ExportPayload struct {
-	Users []ExportUser  `json:"users"`
-	Decks []ExportDeck  `json:"decks"`
-	Games []ExportGame  `json:"games"`
+	Users  []ExportUser  `json:"users"`
+	Decks  []ExportDeck  `json:"decks"`
+	Slices []ExportSlice `json:"slices,omitempty"`
+	Games  []ExportGame  `json:"games"`
 }
 
 type preservedUserAuth struct {
@@ -133,10 +142,38 @@ func buildExportPayload(c *gin.Context, includePasswords bool) (*ExportPayload, 
 		})
 	}
 
+	var slices []models.Slice
+	if err := db.Order("id ASC").Find(&slices).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список разрезов"})
+		return nil, false
+	}
+	exportSlices := make([]ExportSlice, 0, len(slices))
+	for _, s := range slices {
+		var sliceDecks []models.SliceDeck
+		if err := db.Where("slice_id = ?", s.ID).Order("deck_id ASC").Find(&sliceDecks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить пул колод разреза"})
+			return nil, false
+		}
+		var slicePlayers []models.SlicePlayer
+		if err := db.Where("slice_id = ?", s.ID).Order("user_id ASC").Find(&slicePlayers).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить игроков разреза"})
+			return nil, false
+		}
+		es := ExportSlice{Slice: s, DeckIDs: []uint{}, PlayerIDs: []uint{}}
+		for _, sd := range sliceDecks {
+			es.DeckIDs = append(es.DeckIDs, sd.DeckID)
+		}
+		for _, sp := range slicePlayers {
+			es.PlayerIDs = append(es.PlayerIDs, sp.UserID)
+		}
+		exportSlices = append(exportSlices, es)
+	}
+
 	payload := &ExportPayload{
-		Users: exportUsers,
-		Decks: exportDecks,
-		Games: exportGames,
+		Users:  exportUsers,
+		Decks:  exportDecks,
+		Slices: exportSlices,
+		Games:  exportGames,
 	}
 	return payload, true
 }
@@ -232,7 +269,7 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 	}
 
 	// TRUNCATE RESTART IDENTITY сбрасывает последовательности, чтобы новые ID совпадали с порядком в payload.
-	if err := tx.Exec("TRUNCATE users, decks, games RESTART IDENTITY CASCADE").Error; err != nil {
+	if err := tx.Exec("TRUNCATE users, decks, games, slices, slice_decks, slice_players RESTART IDENTITY CASCADE").Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось очистить таблицы", "details": err.Error()})
 		return
@@ -277,9 +314,48 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 		}
 	}
 
+	// Восстанавливаем разрезы и их связи; глобальный (id=1) гарантируем всегда,
+	// в том числе для старых архивов без раздела slices.
+	hasDefaultSlice := false
+	for _, es := range payload.Slices {
+		s := es.Slice
+		if s.ID == 1 {
+			s.IsDefault = true
+			hasDefaultSlice = true
+		}
+		if err := tx.Create(&s).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось восстановить разрез «" + s.Name + "»"})
+			return
+		}
+		for _, deckID := range es.DeckIDs {
+			if err := tx.Create(&models.SliceDeck{SliceID: s.ID, DeckID: deckID}).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось восстановить пул колод разреза"})
+				return
+			}
+		}
+		for _, userID := range es.PlayerIDs {
+			if err := tx.Create(&models.SlicePlayer{SliceID: s.ID, UserID: userID}).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось восстановить игроков разреза"})
+				return
+			}
+		}
+	}
+	if !hasDefaultSlice {
+		if err := tx.Create(&models.Slice{ID: 1, Name: "Глобальный", IsDefault: true}).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать глобальный разрез"})
+			return
+		}
+	}
 	// Восстанавливаем игры, игроков и ходы.
 	for _, eg := range payload.Games {
 		g := eg.Game
+		if g.SliceID == 0 {
+			g.SliceID = 1 // старый архив без разрезов — все игры в глобальный
+		}
 		viewToken := strings.TrimSpace(eg.ViewToken)
 		if viewToken == "" {
 			var err error
@@ -342,6 +418,16 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось восстановить ходы игры"})
 				return
 			}
+		}
+	}
+
+	// Все вставки шли с явными ID и не двигали последовательности —
+	// синхронизируем, иначе следующий INSERT упадёт на duplicate key (games_pkey и т.п.).
+	for _, table := range []string{"users", "decks", "games", "game_players", "game_turns", "slices"} {
+		if err := tx.Exec("SELECT setval(pg_get_serial_sequence('" + table + "','id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM " + table + "), 1))").Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось синхронизировать последовательность таблицы " + table})
+			return
 		}
 	}
 
