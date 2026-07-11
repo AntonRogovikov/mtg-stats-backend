@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -12,6 +13,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// sliceFilterSQL строит фрагмент фильтра по разрезу для агрегирующих запросов.
+// allSlices=true → пустой фильтр (по всем разрезам); иначе — "AND g.slice_id = ?"
+// с соответствующим аргументом.
+func sliceFilterSQL(sliceID uint, allSlices bool) (string, []interface{}) {
+	if allSlices {
+		return "", nil
+	}
+	return "AND g.slice_id = ?", []interface{}{sliceID}
+}
+
 type playerStreaks struct {
 	CurrentWinStreak  *int
 	CurrentLossStreak *int
@@ -19,8 +30,9 @@ type playerStreaks struct {
 	MaxLossStreak     *int
 }
 
-func computePlayerStreaks(db *gorm.DB, sliceID uint) map[uint]playerStreaks {
-	const streakQuery = `
+func computePlayerStreaks(db *gorm.DB, sliceID uint, allSlices bool) map[uint]playerStreaks {
+	sliceFilter, args := sliceFilterSQL(sliceID, allSlices)
+	streakQuery := fmt.Sprintf(`
 		WITH ranked_players AS (
 			SELECT
 				gp.user_id,
@@ -30,7 +42,7 @@ func computePlayerStreaks(db *gorm.DB, sliceID uint) map[uint]playerStreaks {
 				COUNT(*) OVER (PARTITION BY gp.game_id) AS players_count
 			FROM game_players gp
 			JOIN games g ON g.id = gp.game_id
-			WHERE g.end_time IS NOT NULL AND g.winning_team IS NOT NULL AND g.slice_id = ?
+			WHERE g.end_time IS NOT NULL AND g.winning_team IS NOT NULL %s
 		)
 		SELECT
 			user_id,
@@ -38,13 +50,13 @@ func computePlayerStreaks(db *gorm.DB, sliceID uint) map[uint]playerStreaks {
 			(CASE WHEN player_index <= (players_count / 2) THEN 1 ELSE 2 END) = winning_team AS won
 		FROM ranked_players
 		ORDER BY user_id, end_time
-	`
+	`, sliceFilter)
 	var rawRows []struct {
 		UserID  uint      `gorm:"column:user_id"`
 		EndTime time.Time `gorm:"column:end_time"`
 		Won     bool      `gorm:"column:won"`
 	}
-	if err := db.Raw(streakQuery, sliceID).Scan(&rawRows).Error; err != nil {
+	if err := db.Raw(streakQuery, args...).Scan(&rawRows).Error; err != nil {
 		return nil
 	}
 	byUser := make(map[uint][]bool)
@@ -105,7 +117,8 @@ func GetPlayerStats(c *gin.Context) {
 		return
 	}
 
-	sliceID := sliceIDFromQuery(c)
+	sliceID, allSlices := sliceScopeFromQuery(c)
+	sliceFilter, sliceArgs := sliceFilterSQL(sliceID, allSlices)
 	db := database.GetDB()
 	type playerStatsRow struct {
 		UserID             uint   `gorm:"column:user_id"`
@@ -121,7 +134,7 @@ func GetPlayerStats(c *gin.Context) {
 		BestDeckGames      int    `gorm:"column:best_deck_games"`
 	}
 
-	const query = `
+	query := fmt.Sprintf(`
 		WITH ranked_players AS (
 			SELECT
 				gp.game_id,
@@ -140,7 +153,7 @@ func GetPlayerStats(c *gin.Context) {
 			LEFT JOIN decks d ON d.id = gp.deck_id
 			WHERE g.end_time IS NOT NULL
 				AND g.winning_team IS NOT NULL
-				AND g.slice_id = ?
+				%s
 		),
 		players_with_team AS (
 			SELECT
@@ -209,15 +222,15 @@ func GetPlayerStats(c *gin.Context) {
 		LEFT JOIN player_turns pt ON pt.user_id = pg.user_id
 		LEFT JOIN best_deck bd ON bd.user_id = pg.user_id
 		ORDER BY pg.player_name ASC
-	`
+	`, sliceFilter)
 	var rows []playerStatsRow
-	if err := db.Raw(query, sliceID).Scan(&rows).Error; err != nil {
+	if err := db.Raw(query, sliceArgs...).Scan(&rows).Error; err != nil {
 		log.Printf("GetPlayerStats: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить статистику игроков"})
 		return
 	}
 
-	streaks := computePlayerStreaks(db, sliceID)
+	streaks := computePlayerStreaks(db, sliceID, allSlices)
 
 	out := make([]models.PlayerStats, 0, len(rows))
 	for _, r := range rows {
@@ -262,7 +275,8 @@ func GetDeckStats(c *gin.Context) {
 		return
 	}
 
-	sliceID := sliceIDFromQuery(c)
+	sliceID, allSlices := sliceScopeFromQuery(c)
+	sliceFilter, sliceArgs := sliceFilterSQL(sliceID, allSlices)
 	db := database.GetDB()
 	type deckStatsRow struct {
 		DeckID     int    `gorm:"column:deck_id"`
@@ -271,7 +285,7 @@ func GetDeckStats(c *gin.Context) {
 		WinsCount  int    `gorm:"column:wins_count"`
 	}
 	var rows []deckStatsRow
-	query := `
+	query := fmt.Sprintf(`
 		WITH ranked_players AS (
 			SELECT
 				gp.game_id,
@@ -286,7 +300,7 @@ func GetDeckStats(c *gin.Context) {
 			LEFT JOIN decks d ON d.id = gp.deck_id
 			WHERE g.end_time IS NOT NULL
 				AND g.winning_team IS NOT NULL
-				AND g.slice_id = ?
+				%s
 		),
 		players_with_team AS (
 			SELECT
@@ -311,8 +325,8 @@ func GetDeckStats(c *gin.Context) {
 		FROM deck_per_game
 		GROUP BY deck_id
 		ORDER BY deck_name ASC
-	`
-	if err := db.Raw(query, sliceID).Scan(&rows).Error; err != nil {
+	`, sliceFilter)
+	if err := db.Raw(query, sliceArgs...).Scan(&rows).Error; err != nil {
 		log.Printf("GetDeckStats: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить статистику колод"})
 		return

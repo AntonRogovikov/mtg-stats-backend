@@ -22,17 +22,23 @@ const DefaultSliceID uint = 1
 
 var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
-// sliceIDFromQuery — разрез из query ?slice_id=N; по умолчанию глобальный.
-func sliceIDFromQuery(c *gin.Context) uint {
+// sliceScopeFromQuery — область выборки из query ?slice_id=N.
+// Возвращает (sliceID, allSlices): allSlices=true (при ?slice_id=0 или ?slice_id=all)
+// означает агрегацию по всем разрезам без фильтра; иначе — конкретный разрез
+// (по умолчанию глобальный).
+func sliceScopeFromQuery(c *gin.Context) (uint, bool) {
 	raw := strings.TrimSpace(c.Query("slice_id"))
 	if raw == "" {
-		return DefaultSliceID
+		return DefaultSliceID, false
+	}
+	if raw == "0" || strings.EqualFold(raw, "all") {
+		return 0, true
 	}
 	v, err := strconv.ParseUint(raw, 10, 32)
 	if err != nil || v == 0 {
-		return DefaultSliceID
+		return DefaultSliceID, false
 	}
-	return uint(v)
+	return uint(v), false
 }
 
 // buildSliceResponses собирает ответы по разрезам: пул колод, игроки, число игр.

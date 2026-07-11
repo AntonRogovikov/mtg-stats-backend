@@ -59,7 +59,13 @@ func gameResponse(g models.Game, viewer *middleware.UserInfo) models.GameRespons
 func GetGames(c *gin.Context) {
 	db := database.GetDB()
 	var games []models.Game
-	result := db.Where("slice_id = ?", sliceIDFromQuery(c)).Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns").Find(&games)
+	// slice_id=0 (all) — история по всем разрезам без фильтра.
+	sliceID, allSlices := sliceScopeFromQuery(c)
+	query := db.Order("updated_at DESC").Preload("Players", func(db *gorm.DB) *gorm.DB { return db.Order("game_players.id ASC") }).Preload("Players.User").Preload("Turns")
+	if !allSlices {
+		query = query.Where("slice_id = ?", sliceID)
+	}
+	result := query.Find(&games)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось загрузить список игр"})
 		return
