@@ -55,6 +55,12 @@ func fail(format string, args ...any) {
 	os.Exit(1)
 }
 
+// isTerminal сообщает, подключён ли поток к терминалу (а не к пайпу/файлу).
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
 func main() {
 	userName := flag.String("user", "Антон Роговиков", "имя пользователя")
 	password := flag.String("password", "", "новый пароль (если пусто — спросит в консоли)")
@@ -72,9 +78,14 @@ func main() {
 
 	pass := *password
 	if pass == "" {
-		fmt.Printf("Новый пароль для «%s»: ", *userName)
+		// Prompt только для интерактивного терминала; при вводе из пайпа
+		// (обёртка передаёт пароль через stdin) — молча читаем строку.
+		if isTerminal(os.Stdin) {
+			fmt.Printf("Новый пароль для «%s»: ", *userName)
+		}
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		pass = strings.TrimSpace(line)
+		// Режем только перевод строки — пробелы и спецсимволы пароля сохраняем.
+		pass = strings.TrimRight(line, "\r\n")
 	}
 	if len([]rune(pass)) < 4 {
 		fail("Пароль слишком короткий (минимум 4 символа)")
