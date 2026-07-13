@@ -344,9 +344,9 @@ func importAllDataFromPayload(c *gin.Context, payload *ExportPayload) {
 		}
 	}
 	if !hasDefaultSlice {
-		if err := tx.Create(&models.Slice{ID: 1, Name: "Глобальный", IsDefault: true}).Error; err != nil {
+		if err := tx.Create(&models.Slice{ID: 1, Name: "Основной", IsDefault: true}).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать глобальный разрез"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать основной разрез"})
 			return
 		}
 	}

@@ -83,6 +83,24 @@ func buildSliceResponses(db *gorm.DB, slices []models.Slice) ([]models.SliceResp
 		gamesBySlice[gc.SliceID] = int(gc.Count)
 	}
 
+	// Колоды, по которым в разрезе есть хотя бы одна игра — их нельзя убрать из пула.
+	var usedRows []struct {
+		SliceID uint `gorm:"column:slice_id"`
+		DeckID  uint `gorm:"column:deck_id"`
+	}
+	if err := db.Table("game_players AS gp").
+		Select("g.slice_id AS slice_id, gp.deck_id AS deck_id").
+		Joins("JOIN games g ON g.id = gp.game_id").
+		Where("g.slice_id IN ?", ids).
+		Group("g.slice_id, gp.deck_id").
+		Scan(&usedRows).Error; err != nil {
+		return nil, err
+	}
+	usedBySlice := make(map[uint][]uint)
+	for _, r := range usedRows {
+		usedBySlice[r.SliceID] = append(usedBySlice[r.SliceID], r.DeckID)
+	}
+
 	for _, s := range slices {
 		dIDs := deckIDs[s.ID]
 		if dIDs == nil {
@@ -92,16 +110,21 @@ func buildSliceResponses(db *gorm.DB, slices []models.Slice) ([]models.SliceResp
 		if pIDs == nil {
 			pIDs = []uint{}
 		}
+		uIDs := usedBySlice[s.ID]
+		if uIDs == nil {
+			uIDs = []uint{}
+		}
 		out = append(out, models.SliceResponse{
-			ID:         s.ID,
-			Name:       s.Name,
-			Color:      s.Color,
-			IsDefault:  s.IsDefault,
-			DeckIDs:    dIDs,
-			PlayerIDs:  pIDs,
-			GamesCount: gamesBySlice[s.ID],
-			CreatedAt:  s.CreatedAt,
-			UpdatedAt:  s.UpdatedAt,
+			ID:          s.ID,
+			Name:        s.Name,
+			Color:       s.Color,
+			IsDefault:   s.IsDefault,
+			DeckIDs:     dIDs,
+			UsedDeckIDs: uIDs,
+			PlayerIDs:   pIDs,
+			GamesCount:  gamesBySlice[s.ID],
+			CreatedAt:   s.CreatedAt,
+			UpdatedAt:   s.UpdatedAt,
 		})
 	}
 	return out, nil
@@ -221,31 +244,6 @@ func currentSliceDeckIDs(db *gorm.DB, sliceID uint) []uint {
 	return out
 }
 
-// sameIDSet сравнивает наборы id без учёта порядка и дублей.
-func sameIDSet(a, b []uint) bool {
-	setA := make(map[uint]bool, len(a))
-	for _, id := range a {
-		if id != 0 {
-			setA[id] = true
-		}
-	}
-	setB := make(map[uint]bool, len(b))
-	for _, id := range b {
-		if id != 0 {
-			setB[id] = true
-		}
-	}
-	if len(setA) != len(setB) {
-		return false
-	}
-	for id := range setA {
-		if !setB[id] {
-			return false
-		}
-	}
-	return true
-}
-
 func dedupeIDs(ids []uint) []uint {
 	seen := make(map[uint]bool, len(ids))
 	out := make([]uint, 0, len(ids))
@@ -346,26 +344,50 @@ func UpdateSlice(c *gin.Context) {
 		return
 	}
 
-	// Пул сформированного разреза заморожен: если сыграна хотя бы одна игра,
-	// менять состав колод нельзя (глобального не касается — у него пул не хранится).
-	poolLocked := false
-	if !slice.IsDefault {
-		var gamesCount int64
-		if err := db.Model(&models.Game{}).Where("slice_id = ?", slice.ID).Count(&gamesCount).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось проверить игры разреза"})
-			return
-		}
-		poolLocked = gamesCount > 0
-	}
-
-	deckIDs, playerIDs, errMsg := validateSliceRequest(db, &req, slice.ID, slice.IsDefault || poolLocked)
+	deckIDs, playerIDs, errMsg := validateSliceRequest(db, &req, slice.ID, slice.IsDefault)
 	if errMsg != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 		return
 	}
-	if poolLocked && !sameIDSet(req.DeckIDs, currentSliceDeckIDs(db, slice.ID)) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Пул колод нельзя менять: в разрезе уже есть игры"})
-		return
+
+	// Пул можно расширять свободно, но нельзя убрать колоду, по которой в разрезе
+	// уже есть игры (иначе история/статистика ссылались бы на колоду вне пула).
+	// Глобального не касается — у него пул не хранится.
+	if !slice.IsDefault {
+		newSet := make(map[uint]bool, len(deckIDs))
+		for _, id := range deckIDs {
+			newSet[id] = true
+		}
+		removed := make([]uint, 0)
+		for _, id := range currentSliceDeckIDs(db, slice.ID) {
+			if !newSet[id] {
+				removed = append(removed, id)
+			}
+		}
+		if len(removed) > 0 {
+			var blocked []struct {
+				Name string `gorm:"column:name"`
+			}
+			if err := db.Table("game_players AS gp").
+				Select("DISTINCT d.name AS name").
+				Joins("JOIN games g ON g.id = gp.game_id").
+				Joins("JOIN decks d ON d.id = gp.deck_id").
+				Where("g.slice_id = ? AND gp.deck_id IN ?", slice.ID, removed).
+				Scan(&blocked).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось проверить игры колод"})
+				return
+			}
+			if len(blocked) > 0 {
+				names := make([]string, 0, len(blocked))
+				for _, b := range blocked {
+					names = append(names, b.Name)
+				}
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "Нельзя убрать из разреза колоды с играми: " + strings.Join(names, ", "),
+				})
+				return
+			}
+		}
 	}
 
 	err = db.Transaction(func(tx *gorm.DB) error {
@@ -375,7 +397,7 @@ func UpdateSlice(c *gin.Context) {
 		}).Error; err != nil {
 			return err
 		}
-		if slice.IsDefault || poolLocked {
+		if slice.IsDefault {
 			return nil
 		}
 		return replaceSliceLinks(tx, slice.ID, deckIDs, playerIDs)

@@ -97,15 +97,25 @@ func ensureDefaultSlice(db *gorm.DB) error {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		slice = models.Slice{ID: 1, Name: "Глобальный", IsDefault: true}
+		slice = models.Slice{ID: 1, Name: "Основной", IsDefault: true}
 		if err := db.Create(&slice).Error; err != nil {
 			return err
 		}
 		// Счётчик slices выровняет syncSequences сразу после сида.
-		log.Println("Создан глобальный разрез (id=1)")
-	} else if !slice.IsDefault {
-		if err := db.Model(&slice).Update("is_default", true).Error; err != nil {
-			return err
+		log.Println("Создан основной разрез (id=1)")
+	} else {
+		updates := map[string]interface{}{}
+		if !slice.IsDefault {
+			updates["is_default"] = true
+		}
+		// Переименование прежнего «Глобальный» → «Основной» (одноразово).
+		if slice.Name == "Глобальный" {
+			updates["name"] = "Основной"
+		}
+		if len(updates) > 0 {
+			if err := db.Model(&slice).Updates(updates).Error; err != nil {
+				return err
+			}
 		}
 	}
 	return db.Exec("UPDATE games SET slice_id = 1 WHERE slice_id IS NULL OR slice_id = 0").Error
